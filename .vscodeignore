@@ -1,0 +1,25 @@
+# Editor and VCS
+.vscode/**
+.git/**
+.gitignore
+
+# Tests and docs
+**/tests/**
+docs/**
+
+# Sources bundled into out/extension.js
+code/jekyl/**
+
+# Build tooling and dependencies
+esbuild.js
+package-lock.json
+node_modules/**
+**/tsconfig.json
+**/ocicl/**
+
+# Lisp executable built locally (implementation-specific)
+out/clide
+
+# Archives and source maps
+*.zip
+**/*.map

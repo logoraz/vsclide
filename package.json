@@ -1,0 +1,68 @@
+{
+  "name": "vsclide",
+  "displayName": ":VSCLIDE",
+  "description": "A full-powered Common Lisp IDE for VS Code.",
+  "version": "0.0.1",
+  "publisher": "locutus",
+  "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/logoraz/vsclide.git"
+  },
+  "engines": {
+    "vscode": "^1.85.0"
+  },
+  "categories": [
+    "Programming Languages"
+  ],
+  "keywords": [
+    "common lisp",
+    "lisp",
+    "sbcl",
+    "egcl",
+    "slynk",
+    "repl"
+  ],
+  "main": "./out/extension.js",
+  "activationEvents": [
+    "onLanguage:commonlisp"
+  ],
+  "contributes": {
+    "languages": [
+      {
+        "id": "commonlisp",
+        "aliases": [
+          "Common Lisp"
+        ],
+        "extensions": [
+          ".lisp",
+          ".sexp",
+          ".asd",
+          ".lsp",
+          ".cl"
+        ]
+      }
+    ],
+    "commands": [
+      {
+        "command": "vsclide.ping",
+        "title": "VSCLIDE: Ping clide"
+      }
+    ]
+  },
+  "scripts": {
+    "check-types": "tsc --noEmit -p ./code/jekyl",
+    "compile": "npm run check-types && node esbuild.js",
+    "watch": "node esbuild.js --watch",
+    "bundle": "npm run check-types && node esbuild.js --production",
+    "vscode:prepublish": "npm run bundle",
+    "package": "vsce package"
+  },
+  "devDependencies": {
+    "@types/node": "^20.0.0",
+    "@types/vscode": "^1.85.0",
+    "@vscode/vsce": "^3.0.0",
+    "esbuild": "^0.25.0",
+    "typescript": "^5.4.0"
+  }
+}

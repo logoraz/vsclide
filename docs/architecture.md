@@ -1,0 +1,216 @@
+# vsclide: Architecture
+
+A full-powered Common Lisp IDE for VS Code. Display name `:VSCLIDE`,
+MIT licensed, hosted on Codeberg.
+
+## Goals
+
+- No bundled image: the user supplies any Common Lisp implementation
+  - SBCL is the primary target
+  - EGCL (Evergreen Common Lisp) is supported as experimental
+  - Both are kept in mind during development; other implementations later
+- Uniform experience through pinned sources, not shared binaries
+- Built in two arms, in this order:
+  1. Slynk-based REPL and IDE features
+  2. Later, a Climacs-style design for Lisp-side editing support, as a
+     Lisp-side server for configurability and extensibility; it is
+     crucial to the extension and is built on eclector (see below)
+
+## Repository layout
+
+```
+vsclide/
+├── .gitignore
+├── .vscodeignore
+├── .vscode/
+│   └── settings.json
+├── LICENSE
+├── README.md
+├── package.json              main -> out/extension.js
+├── code/
+│   ├── clide/                Common Lisp side (one ASDF system)
+│   │   ├── clide.asd         subsystems: clide/tests, clide/docs planned
+│   │   ├── clide.lisp        entry point: main
+│   │   ├── version.sexp
+│   │   ├── base/             server.lisp
+│   │   ├── lib/              ansi-color.lisp, jsonrpc.lisp
+│   │   └── tests/
+│   └── jekyl/                TypeScript side (extension host)
+│       ├── tsconfig.json     type-check only (noEmit)
+│       ├── base/
+│       ├── lib/
+│       └── tests/
+├── data/
+│   └── graphics/
+│       └── lisp-icon-sm.svg  icon source; PNG for marketplace later
+└── docs/
+```
+
+- Directories are named by role; no `src` convention
+- Both languages live in one repo, as SLIME does with swank
+- `.vscodeignore` excludes tests, docs, `code/jekyl`, `.vscode`
+
+## Runtime
+
+- The extension spawns and supervises the user's Lisp implementation
+- Two separate processes:
+  - A slynk server for the IDE
+  - A plain REPL for the terminal, via a terminal profile
+- Hermetic by default:
+  - Init files not loaded unless a setting opts in
+  - Slynk listens on an ephemeral loopback port
+- Implementation path is a setting; SBCL is primary, EGCL experimental
+- Implementation-specific code is guarded with `#+sbcl` and `#+egcl`;
+  for example the terminal check in `ansi-color.lisp` uses
+  `sb-unix:unix-isatty` on SBCL and `isatty` through `egcl-ffi` on EGCL
+- First step: get slynk serving on SBCL, then bring EGCL along
+
+## EGCL notes (experimental)
+
+- EGCL maintains forks of libraries, installed through ocicl Git sources
+  (`git+URL@branch`) and pinned by commit
+- The SLY fork (`atgreen/sly`, branch `egcl`) has a slynk backend; it is
+  single-threaded (communication style NIL)
+- Its `slynk.asd` does not register the backend, so
+  `(asdf:load-system :slynk)` fails with "GRAY-PACKAGE-NAME not implemented"
+- `slynk/run-egcl-slynk.sh` loads the files explicitly, in order, and
+  slynk then serves on a port
+- Verified: with `sly-contribs` set to nil, a SLY client connects to
+  the fork's slynk on EGCL and evaluates `(+ 1 2)`
+- With `sly-fancy` contribs the connection failed; the log shows ASDF
+  loading the Guix `cl-slynk` over the fork (likely cause, not confirmed)
+- Contribs load through ASDF, so on EGCL they would need explicit loading
+- The fork stubs `slynk-gray`, so mrepl may not work (untested)
+- Untested on EGCL: mrepl, stickers, inspector, completion, arglists
+- The slynk launch path differs per implementation: SBCL loads slynk
+  through ASDF; EGCL uses the fork's explicit load sequence
+- The swank fork is registered in `swank.asd` and loads through ASDF
+- `interactive-stream-p` is always true for standard streams on EGCL, so
+  the tty check uses `isatty` through the FFI
+
+## Lisp side (clide)
+
+- clide speaks slynk; jekyl talks to clide
+- clide stays modular: its own process, separate from the slynk server
+- jekyl and clide communicate over JSON-RPC 2.0 on a loopback socket
+  - Chosen to support multiple clients and reconnects, as groundwork
+    for the Climacs-style arm
+  - clide listens on an ephemeral 127.0.0.1 port; jekyl connects
+  - Stdout carries one JSON line announcing the port; stderr carries
+    log output
+
+### JSON-RPC server
+
+- Framing is LSP-style: a `Content-Length` header, a blank line, then a
+  UTF-8 JSON body; the length counts bytes
+- Handshake and token:
+  - jekyl generates a per-session token and passes it to clide in the
+    `CLIDE_TOKEN` environment variable, never on the command line,
+    where `ps` would show it
+  - clide prints `{"port":N}` on stdout once it is listening
+  - The first message on every connection must be `initialize` with the
+    token in its params; anything else gets error `-32001`
+    (unauthorized) and the connection closes
+  - Tokens are compared in constant time
+- Concurrency: one thread per connection (bordeaux-threads)
+  - The method table is filled before the server starts, so it needs no
+    lock; the connection registry has a lock
+  - EGCL threading is unproven; SBCL is the reference
+- Methods are plain functions of the params registered by name; the
+  built-in method is `ping`, which returns `"pong"`
+- Errors: protocol failures use the standard JSON-RPC codes; a handler
+  that signals gets `-32603`; unknown methods get `-32601`
+- Code layout:
+  - `lib/jsonrpc.lisp`: framing, message constructors, error codes
+  - `base/server.lisp`: server struct, dispatch, handshake, lifecycle
+  - `clide.lisp`: `main`, built-in methods
+- The server is a struct with named functions and no special variables;
+  the server is passed explicitly and its log function is a slot
+
+### Editing arm (deferred)
+
+- The Climacs-style arm needs a Lisp reader that tolerates incomplete
+  and erroneous source; eclector is the intended basis
+- It is deferred, not dropped: `eclector` and `base/tokenizer.lisp` are
+  out of the ASDF system for now and return when that arm starts
+- ocicl currently fails to extract eclector ("file name contained an
+  unexpected NUL byte"); resolve this before the arm starts
+
+- Slynk is the ASDF system `slynk` (`cl-slynk` is only the Guix name)
+- Contribs are separate systems (`slynk/mrepl`, `slynk/stickers`, ...)
+- Contribs load on demand, as SLY does:
+  - The client keeps a list of enabled contribs
+  - Default is `sly-fancy` only
+  - On connect it calls `slynk-add-load-paths`, then `slynk-require`
+    for the modules the server has not loaded yet
+  - Modules already loaded are skipped
+
+## First-launch build
+
+- On activation, check for a build matching clide version and
+  implementation; build it if missing
+- Run the implementation headless, load clide through ASDF, optionally
+  save a core
+- Store results in `context.globalStorageUri`, not the install directory
+- Cache key: clide version plus implementation and its version
+- Show progress with `vscode.window.withProgress`; full output goes to
+  an output channel
+- Lock file prevents concurrent builds from multiple windows
+- The build saves a core with clide preloaded; the IDE starts from it
+- If saving the core fails, fall back to the ASDF FASL cache, with
+  slower startup
+- Failures matter most: errors must name the failing step
+- Dependencies are fetched with ocicl by default, pinned by `ocicl.csv`
+  - A setting lets the user override the acquisition method
+
+## Extension side (jekyl)
+
+- Logic is segregated into `base/` and `lib/`, mirroring clide
+- Responsibilities to place within them: process supervision, command
+  registration, settings, views
+- Entry point `code/jekyl/extension.ts` (template only)
+- Build follows the official bundling guidance, adapted to our layout:
+  - esbuild bundles `code/jekyl/extension.ts` into `out/extension.js`
+  - `main` in `package.json` still points at `./out/extension.js`
+  - `tsc --noEmit` only type-checks; esbuild strips types unchecked
+  - `vscode` is external; output is CommonJS for Node
+  - Production bundles are minified; development builds have source maps
+  - Tests are compiled separately, never bundled
+- The official layout (`src/`, `dist/`) is a sample, not a requirement
+- Build scripts in `package.json`:
+  - `check-types`, `compile`, `watch`
+  - `bundle` (production), run by `vscode:prepublish`
+  - `package` runs `vsce package`
+- `esbuild.js` at the repo root is the build script
+- Slynk was chosen over swank for mrepl, stickers and richer features
+  - Cost: sparse protocol docs and few non-Emacs clients to compare with
+
+## REPL UI
+
+- A panel view container (`viewsContainers.panel`) with a webview view
+- Plain TypeScript in the webview; no React needed
+- Mimics a slynk mrepl: one REPL per channel
+- A list on the right of the panel, like the terminal tabs list
+  - The native list is internal to VS Code, so we build our own
+- `view/title` buttons for clear, new, kill
+- The REPL tab shows when a process starts, via a `when` context flag
+
+## Packaging and distribution
+
+- Launch target: Linux only, for now
+- One universal VSIX; no platform-specific images
+- Publish to Open VSX and the Microsoft marketplace (`vsce`, `ovsx`)
+- Pin dependency versions; ship license notices for anything vendored
+- `code/clide` ships inside the VSIX; the first-launch build loads it
+- `.vscodeignore` also excludes `esbuild.js`, `package-lock.json`,
+  `node_modules/**` and `**/tsconfig.json`
+
+## Prior art
+
+- Alive: TypeScript extension plus `alive-lsp` in Lisp; own LSP
+  protocol, no swank; Unlicense
+- OLIVE: a SLIME-style Common Lisp IDE for VS Code (not yet studied)
+
+## Open questions
+
+None at present.

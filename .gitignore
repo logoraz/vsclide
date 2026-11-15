@@ -1,0 +1,25 @@
+# TypeScript build output
+out/
+
+# npm
+node_modules/
+
+# Packaged extension and archives
+*.vsix
+*.zip
+
+# Extension test host downloads
+.vscode-test/
+
+# Common Lisp build artifacts
+*.fasl
+*.core
+
+# ocicl installs at any depth; only the pin file in code/clide is tracked
+ocicl/
+ocicl.csv
+!/code/clide/ocicl.csv
+
+# Editor and OS cruft
+*~
+.DS_Store
