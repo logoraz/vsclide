@@ -8,16 +8,19 @@
                "trivial-gray-streams"
                "flexi-streams"
                "usocket"
-               "com.inuoe.jzon"
-               "slynk")
+               "com.inuoe.jzon")
   :components ((:module "lib"
                 :pathname "lib"
                 :components ((:file "ansi-color")
-                             (:file "jsonrpc")))
+                             (:file "jsonrpc")
+                             (:file "slynk-wire")))
                (:module "base"
                 :pathname "base"
                 :depends-on ("lib")
-                :components ((:file "server")))
+                :components ((:file "server")
+                             (:file "slynk-client")
+                             (:file "ide"
+                              :depends-on ("server" "slynk-client"))))
                (:module "interface"
                 :pathname "./"
                 :depends-on ("lib" "base")
@@ -36,13 +39,14 @@ on a loopback socket.")
 
 (defsystem "clide/tests"
   :description "Unit Tests."
-  :depends-on ("clide" "fiveam")
+  :depends-on ("clide" "fiveam" "slynk")
   :components
   ((:module "tests"
     :components
     ((:file "suite")
      (:file "lib" :depends-on ("suite"))
      (:file "base" :depends-on ("suite"))
+     (:file "slynk" :depends-on ("suite"))
      (:file "interface" :depends-on ("suite")))))
   :perform (test-op (o c) (symbol-call :fiveam :run!
                                        (find-symbol "SUITE"

@@ -11,12 +11,14 @@
                 #:socket-connect
                 #:socket-accept
                 #:socket-close
+                #:socket-shutdown
                 #:socket-stream
                 #:get-local-port)
   (:import-from :clide/lib/jsonrpc
                 #:read-message
                 #:write-message
                 #:make-object
+                #:make-notification
                 #:make-response
                 #:make-error-response
                 #:message-id
@@ -33,6 +35,7 @@
   (:export #:make-server
            #:server-port
            #:register-method
+           #:broadcast
            #:start-server
            #:stop-server)
   (:documentation "Loopback JSON-RPC server."))
@@ -58,6 +61,16 @@
   (port nil)
   (accept-thread nil)
   (connections '() :type list))
+
+(defstruct (connection (:constructor make-connection (socket stream)))
+  "One client of the server.  Replies and notifications are written
+from several threads, so every write holds WRITE-LOCK."
+  socket
+  stream
+  (write-lock (make-lock "clide-connection-write"))
+  (close-lock (make-lock "clide-connection-close"))
+  (closed nil)
+  (ready nil))
 
 (defun make-server (&key token log-fn)
   "Return a new server that requires TOKEN in the initialize call.
@@ -143,70 +156,118 @@ a notification.  Unknown methods yield +METHOD-NOT-FOUND+."
 
 ;;; Connections
 
+(defun send-message (connection message)
+  "Write MESSAGE to CONNECTION, one writer at a time."
+  (with-lock-held ((connection-write-lock connection))
+    (write-message (connection-stream connection) message)))
+
 (defun initialize-token (request)
   "Return the token carried by an initialize REQUEST, or NIL."
   (let ((params (message-params request)))
     (and (hash-table-p params)
          (values (gethash "token" params)))))
 
-(defun handshake (server stream)
-  "Read the first message from STREAM and check it.
+(defun handshake (server connection)
+  "Read the first message on CONNECTION and check it.
 Return true when it is an initialize call with the right token, after
 replying to it.  Otherwise reply with +UNAUTHORIZED+ and return NIL."
-  (let ((request (read-message stream)))
+  (let ((request (read-message (connection-stream connection))))
     (cond ((eq request :eof) nil)
           ((and (equal (message-method request) "initialize")
                 (token-valid-p server (initialize-token request)))
-           (write-message stream
-                          (make-response (message-id request)
-                                         (make-object "name" "clide")))
+           (send-message connection
+                         (make-response (message-id request)
+                                        (make-object "name" "clide")))
            t)
           (t
            (server-log server "Rejected connection: bad handshake.")
-           (write-message stream
-                          (make-error-response
-                           (response-id request) +unauthorized+
-                           "Initialize with a valid token first."))
+           (send-message connection
+                         (make-error-response
+                          (response-id request) +unauthorized+
+                          "Initialize with a valid token first."))
            nil))))
 
-(defun serve-connection (server stream)
-  "Handshake, then answer requests on STREAM until it closes.
+(defun answer (server connection request)
+  "Run REQUEST and write the reply to CONNECTION, if there is one.
+A connection that has closed meanwhile is not an error."
+  (handler-case
+      (let ((response (dispatch server request)))
+        (when response
+          (send-message connection response)))
+    (error (condition)
+      (server-log server "Could not reply: ~a" condition))))
+
+(defun serve-requests (server connection)
+  "Read requests from CONNECTION until it closes.  Each request runs
+in its own thread, so a slow method does not hold up the next request
+and replies may arrive out of order; clients match them by id."
+  (loop :for request := (read-message (connection-stream connection))
+        :until (eq request :eof)
+        :do (let ((request request))
+              (make-thread (lambda () (answer server connection request))
+                           :name "clide-request"))))
+
+(defun serve-connection (server connection)
+  "Handshake, then answer requests on CONNECTION until it closes.
 The first message must be initialize with the token; otherwise reply
 with +UNAUTHORIZED+ and close."
   (handler-case
-      (when (handshake server stream)
-        (loop :for request := (read-message stream)
-              :until (eq request :eof)
-              :do (let ((response (dispatch server request)))
-                    (when response
-                      (write-message stream response)))))
+      (when (handshake server connection)
+        (setf (connection-ready connection) t)
+        (serve-requests server connection))
     (jsonrpc-error (condition)
       (ignore-errors
-       (write-message stream
-                      (make-error-response nil
-                                           (jsonrpc-error-code condition)
-                                           (jsonrpc-error-message
-                                            condition)))))
+       (send-message connection
+                     (make-error-response nil
+                                          (jsonrpc-error-code condition)
+                                          (jsonrpc-error-message
+                                           condition)))))
     (error (condition)
       (server-log server "Connection closed: ~a" condition))))
 
-(defun forget-connection (server socket)
-  "Close SOCKET and remove it from the connection registry."
-  (ignore-errors (socket-close socket))
+(defun close-connection (connection)
+  "Shut down and close the socket of CONNECTION, the first time only.
+Shutting down wakes a thread blocked reading the socket.  A second
+shutdown could hit another socket that has reused the descriptor."
+  (let ((first-time (with-lock-held ((connection-close-lock connection))
+                      (unless (connection-closed connection)
+                        (setf (connection-closed connection) t)))))
+    (when first-time
+      (ignore-errors (socket-shutdown (connection-socket connection) :io))
+      (ignore-errors (socket-close (connection-socket connection))))))
+
+(defun forget-connection (server connection)
+  "Close CONNECTION and remove it from the registry."
+  (setf (connection-ready connection) nil)
+  (close-connection connection)
   (with-lock-held ((server-lock server))
     (setf (server-connections server)
-          (remove socket (server-connections server)))))
+          (remove connection (server-connections server)))))
 
 (defun spawn-connection (server socket)
   "Serve SOCKET in a new thread and record it in the registry.
 Return the thread."
-  (with-lock-held ((server-lock server))
-    (push socket (server-connections server)))
-  (make-thread (lambda ()
-                 (unwind-protect
-                      (serve-connection server (socket-stream socket))
-                   (forget-connection server socket)))
-               :name "clide-connection"))
+  (let ((connection (make-connection socket (socket-stream socket))))
+    (with-lock-held ((server-lock server))
+      (push connection (server-connections server)))
+    (make-thread (lambda ()
+                   (unwind-protect
+                        (serve-connection server connection)
+                     (forget-connection server connection)))
+                 :name "clide-connection")))
+
+(defun broadcast (server method params)
+  "Send a notification for METHOD with PARAMS to every client that has
+completed the handshake.  A client that cannot be written to is
+skipped; its own thread notices the closed connection."
+  (let ((message (make-notification method params))
+        (connections (with-lock-held ((server-lock server))
+                       (copy-list (server-connections server)))))
+    (dolist (connection connections)
+      (when (connection-ready connection)
+        (handler-case (send-message connection message)
+          (error (condition)
+            (server-log server "Could not notify: ~a" condition)))))))
 
 
 ;;; Lifecycle
@@ -257,7 +318,7 @@ the actual port.  PORT 0 picks an ephemeral port."
       (when (and thread (not (eq thread (current-thread))))
         (ignore-errors (join-thread thread)))
       (ignore-errors (socket-close listener)))
-    (dolist (socket (with-lock-held ((server-lock server))
-                      (copy-list (server-connections server))))
-      (ignore-errors (socket-close socket)))
+    (dolist (connection (with-lock-held ((server-lock server))
+                          (copy-list (server-connections server))))
+      (close-connection connection))
     nil))

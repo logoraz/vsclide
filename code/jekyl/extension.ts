@@ -1,30 +1,28 @@
-import * as path from "node:path";
 import * as vscode from "vscode";
-import { LaunchOptions } from "./base/process";
+import { Ide } from "./base/ide";
+import { LaunchContext, clideLaunch, slynkLaunch } from "./base/launch";
 import { Session } from "./base/session";
+import { registerCommands } from "./interface/commands";
+import { ReplView, VIEW_ID } from "./interface/repl";
+import { Results } from "./interface/results";
+import { Status } from "./interface/status";
 
-let session: Session | undefined;
+let ide: Ide | undefined;
 
 /**
- * Return the development launch: SBCL loading clide from this
- * checkout, run from code/clide so ocicl and ASDF resolve systems.
- * Only valid while the extension runs from a checkout (F5).
+ * Return what launching the Lisp processes depends on. The Lisp
+ * implementation comes from the vsclide.lisp.command setting.
  */
-function developmentLaunch(
+function launchContext(
   context: vscode.ExtensionContext,
   output: vscode.OutputChannel,
-): LaunchOptions {
+): LaunchContext {
   return {
-    command: "sbcl",
-    args: [
-      "--noinform",
-      "--non-interactive",
-      "--eval",
-      '(asdf:load-system "clide")',
-      "--eval",
-      "(clide:main)",
-    ],
-    cwd: path.join(context.extensionUri.fsPath, "code", "clide"),
+    extensionPath: context.extensionUri.fsPath,
+    workspacePath: vscode.workspace.workspaceFolders?.[0]?.uri.fsPath,
+    lispCommand: vscode.workspace
+      .getConfiguration("vsclide")
+      .get<string>("lisp.command", "sbcl"),
     log: (line) => output.appendLine(line),
   };
 }
@@ -33,38 +31,47 @@ function developmentLaunch(
  * Extension entry point; called by VS Code on first activation
  * (see activationEvents in package.json).
  *
+ * Only the development launch of clide, from a checkout, exists so far.
+ *
  * @param context Extension context; owns subscriptions and storage.
  */
 export function activate(context: vscode.ExtensionContext): void {
   const output = vscode.window.createOutputChannel("VSCLIDE");
   context.subscriptions.push(output);
 
+  const session = new Session(() => {
+    if (context.extensionMode !== vscode.ExtensionMode.Development) {
+      throw new Error("only the development launch is implemented");
+    }
+    return clideLaunch(launchContext(context, output));
+  });
+  ide = new Ide(session, () => slynkLaunch(launchContext(context, output)));
+
+  const status = new Status(ide);
+  const results = new Results(output);
+  const repl = new ReplView(context.extensionUri, ide);
   context.subscriptions.push(
-    vscode.commands.registerCommand("vsclide.ping", async () => {
-      if (context.extensionMode !== vscode.ExtensionMode.Development) {
-        vscode.window.showErrorMessage(
-          "VSCLIDE: only the development launch is implemented.",
-        );
-        return;
-      }
-      session ??= new Session(developmentLaunch(context, output));
-      try {
-        const client = await session.ensure();
-        const reply = await client.request<string>("ping");
-        vscode.window.showInformationMessage(`clide replied: ${reply}`);
-      } catch (error) {
-        output.show(true);
-        vscode.window.showErrorMessage(
-          `VSCLIDE: ping failed: ${(error as Error).message}`,
-        );
-      }
+    status,
+    results,
+    repl,
+    vscode.window.registerWebviewViewProvider(VIEW_ID, repl, {
+      webviewOptions: { retainContextWhenHidden: true },
     }),
+    new vscode.Disposable(
+      ide.onEvent((event) => {
+        if (event.type === "output") output.append(event.text);
+        if (event.type === "disconnected") {
+          output.appendLine(`;; disconnected: ${event.reason}`);
+        }
+      }),
+    ),
+    ...registerCommands({ ide, results, status, repl, output }),
   );
 }
 
 /**
- * Called by VS Code on shutdown or disable; stops clide.
+ * Called by VS Code on shutdown or disable; stops slynk and clide.
  */
 export function deactivate(): Thenable<void> | undefined {
-  return session?.stop();
+  return ide?.stop();
 }

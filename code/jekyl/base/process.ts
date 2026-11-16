@@ -2,29 +2,33 @@ import { spawn } from "node:child_process";
 import { randomBytes } from "node:crypto";
 import * as readline from "node:readline";
 
-/** How to launch the Lisp implementation running clide. */
+/** How to launch a Lisp process that announces a port. */
 export interface LaunchOptions {
   /** Implementation executable, for example "sbcl". */
   command: string;
-  /** Arguments that load clide and call clide:main. */
+  /** Arguments that load the system and print the announcement. */
   args: string[];
   /** Working directory; ocicl and ASDF resolve systems from here. */
   cwd: string;
-  /** Receives one line of clide output at a time. */
+  /** Receives one line of the process's output at a time. */
   log: (line: string) => void;
   /** Give up waiting for the port line after this long. */
   timeoutMs?: number;
 }
 
-/** A running clide process that has announced its port. */
-export interface ClideProcess {
+/** A running Lisp process that has announced its port. */
+export interface LispProcess {
   readonly port: number;
-  /** Session token the first message on a connection must carry. */
-  readonly token: string;
   /** Resolves with the exit code, or null when killed by a signal. */
   readonly exited: Promise<number | null>;
   /** Stop the process; resolves once it has exited. */
   stop(): Promise<void>;
+}
+
+/** A running clide process. */
+export interface ClideProcess extends LispProcess {
+  /** Session token the first message on a connection must carry. */
+  readonly token: string;
 }
 
 const DEFAULT_TIMEOUT_MS = 120_000;
@@ -37,9 +41,9 @@ export function generateToken(): string {
 }
 
 /**
- * Return the port if LINE ends with clide's announcement, else
- * undefined. The announcement is a JSON object such as {"port":40075};
- * other output may precede it on the same line.
+ * Return the port if LINE ends with the announcement, else undefined.
+ * The announcement is a JSON object such as {"port":40075}; other
+ * output may precede it on the same line.
  */
 export function parsePortLine(line: string): number | undefined {
   const match = /\{"port":(\d+)\}\s*$/.exec(line);
@@ -47,17 +51,20 @@ export function parsePortLine(line: string): number | undefined {
 }
 
 /**
- * Spawn clide and resolve once it announces its port on stdout.
- * The token goes in the CLIDE_TOKEN environment variable, never on
- * the command line. Other stdout lines and all stderr lines go to
- * the log function. Rejects if the process fails to start, exits
+ * Spawn a Lisp process and resolve once it announces its port on
+ * stdout. NAME says what the process is, for error messages. EXTRA is
+ * added to the environment. Other stdout lines and all stderr lines go
+ * to the log function. Rejects if the process fails to start, exits
  * first, or stays silent past the timeout.
  */
-export function startClide(options: LaunchOptions): Promise<ClideProcess> {
-  const token = generateToken();
+export function startLisp(
+  options: LaunchOptions,
+  name: string,
+  extra: Record<string, string> = {},
+): Promise<LispProcess> {
   const child = spawn(options.command, options.args, {
     cwd: options.cwd,
-    env: { ...process.env, CLIDE_TOKEN: token },
+    env: { ...process.env, ...extra },
     stdio: ["ignore", "pipe", "pipe"],
   });
 
@@ -80,11 +87,11 @@ export function startClide(options: LaunchOptions): Promise<ClideProcess> {
     clearTimeout(timer);
   };
 
-  return new Promise<ClideProcess>((resolve, reject) => {
+  return new Promise<LispProcess>((resolve, reject) => {
     let announced = false;
     const timer = setTimeout(() => {
       void stop();
-      reject(new Error(startupFailure("timed out", tail)));
+      reject(new Error(startupFailure(name, "timed out", tail)));
     }, options.timeoutMs ?? DEFAULT_TIMEOUT_MS);
 
     readline.createInterface({ input: child.stdout! }).on("line", (line) => {
@@ -96,7 +103,7 @@ export function startClide(options: LaunchOptions): Promise<ClideProcess> {
       }
       announced = true;
       clearTimeout(timer);
-      resolve({ port, token, exited, stop });
+      resolve({ port, exited, stop });
     });
 
     readline.createInterface({ input: child.stderr! }).on("line", (line) => {
@@ -113,14 +120,34 @@ export function startClide(options: LaunchOptions): Promise<ClideProcess> {
       clearTimeout(timer);
       if (!announced) {
         const how = signal ? `was killed by ${signal}` : `exited ${code}`;
-        reject(new Error(startupFailure(how, tail)));
+        reject(new Error(startupFailure(name, how, tail)));
       }
     });
   });
 }
 
-/** Describe a startup failure, with the last lines clide printed. */
-function startupFailure(what: string, tail: string[]): string {
+/**
+ * Spawn clide and resolve once it announces its port. The token goes
+ * in the CLIDE_TOKEN environment variable, never on the command line.
+ */
+export async function startClide(
+  options: LaunchOptions,
+): Promise<ClideProcess> {
+  const token = generateToken();
+  const lisp = await startLisp(options, "clide", { CLIDE_TOKEN: token });
+  return { ...lisp, token };
+}
+
+/**
+ * Spawn the slynk server the IDE talks to and resolve once it
+ * announces its port. It listens on loopback only.
+ */
+export function startSlynk(options: LaunchOptions): Promise<LispProcess> {
+  return startLisp(options, "slynk");
+}
+
+/** Describe a startup failure, with the last lines the process printed. */
+function startupFailure(name: string, what: string, tail: string[]): string {
   const lines = tail.length ? `\n${tail.join("\n")}` : "";
-  return `clide ${what} before announcing its port${lines}`;
+  return `${name} ${what} before announcing its port${lines}`;
 }

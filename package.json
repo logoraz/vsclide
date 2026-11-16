@@ -2,7 +2,7 @@
   "name": "vsclide",
   "displayName": ":VSCLIDE",
   "description": "A full-powered Common Lisp IDE for VS Code.",
-  "version": "0.0.1",
+  "version": "0.0.2",
   "publisher": "locutus",
   "license": "MIT",
   "repository": {
@@ -25,7 +25,8 @@
   ],
   "main": "./out/extension.js",
   "activationEvents": [
-    "onLanguage:commonlisp"
+    "onLanguage:commonlisp",
+    "onView:vsclide.mrepl"
   ],
   "contributes": {
     "languages": [
@@ -45,18 +46,143 @@
     ],
     "commands": [
       {
-        "command": "vsclide.ping",
-        "title": "VSCLIDE: Ping clide"
+        "command": "vsclide.connect",
+        "title": "VSCLIDE: Connect"
+      },
+      {
+        "command": "vsclide.disconnect",
+        "title": "VSCLIDE: Disconnect and Stop Lisp"
+      },
+      {
+        "command": "vsclide.restart",
+        "title": "VSCLIDE: Restart Lisp"
+      },
+      {
+        "command": "vsclide.evalTopLevelForm",
+        "title": "VSCLIDE: Evaluate Top-Level Form"
+      },
+      {
+        "command": "vsclide.evalLastExpression",
+        "title": "VSCLIDE: Evaluate Last Expression"
+      },
+      {
+        "command": "vsclide.evalSelection",
+        "title": "VSCLIDE: Evaluate Selection"
+      },
+      {
+        "command": "vsclide.showOutput",
+        "title": "VSCLIDE: Show Output"
+      },
+      {
+        "command": "vsclide.openRepl",
+        "title": "VSCLIDE: Open mREPL"
+      },
+      {
+        "command": "vsclide.newRepl",
+        "title": "VSCLIDE: New mREPL",
+        "icon": "$(add)"
+      },
+      {
+        "command": "vsclide.closeRepl",
+        "title": "VSCLIDE: Close mREPL",
+        "icon": "$(trash)"
+      },
+      {
+        "command": "vsclide.clearRepl",
+        "title": "VSCLIDE: Clear mREPL",
+        "icon": "$(clear-all)"
       }
-    ]
+    ],
+    "configuration": {
+      "title": "VSCLIDE",
+      "properties": {
+        "vsclide.lisp.command": {
+          "type": "string",
+          "default": "sbcl",
+          "description": "Lisp implementation executable that runs clide and slynk."
+        }
+      }
+    },
+    "keybindings": [
+      {
+        "command": "vsclide.evalTopLevelForm",
+        "key": "ctrl+alt+x",
+        "when": "editorLangId == commonlisp"
+      },
+      {
+        "command": "vsclide.evalLastExpression",
+        "key": "ctrl+alt+e",
+        "when": "editorLangId == commonlisp"
+      },
+      {
+        "command": "vsclide.evalSelection",
+        "key": "ctrl+alt+shift+r",
+        "when": "editorLangId == commonlisp && editorHasSelection"
+      },
+      {
+        "command": "vsclide.openRepl",
+        "key": "ctrl+alt+l",
+        "when": "editorLangId == commonlisp"
+      }
+    ],
+    "menus": {
+      "editor/context": [
+        {
+          "command": "vsclide.evalTopLevelForm",
+          "when": "editorLangId == commonlisp",
+          "group": "vsclide@1"
+        },
+        {
+          "command": "vsclide.evalSelection",
+          "when": "editorLangId == commonlisp && editorHasSelection",
+          "group": "vsclide@2"
+        }
+      ],
+      "view/title": [
+        {
+          "command": "vsclide.newRepl",
+          "when": "view == vsclide.mrepl",
+          "group": "navigation@1"
+        },
+        {
+          "command": "vsclide.clearRepl",
+          "when": "view == vsclide.mrepl",
+          "group": "navigation@2"
+        },
+        {
+          "command": "vsclide.closeRepl",
+          "when": "view == vsclide.mrepl",
+          "group": "navigation@3"
+        }
+      ]
+    },
+    "viewsContainers": {
+      "panel": [
+        {
+          "id": "vsclide-panel",
+          "title": "mREPL",
+          "icon": "data/graphics/lisp-icon-sm.svg"
+        }
+      ]
+    },
+    "views": {
+      "vsclide-panel": [
+        {
+          "type": "webview",
+          "id": "vsclide.mrepl",
+          "name": "mREPL"
+        }
+      ]
+    }
   },
   "scripts": {
-    "check-types": "tsc --noEmit -p ./code/jekyl",
+    "check-types": "tsc --noEmit -p ./code/jekyl && tsc --noEmit -p ./code/jekyl/webview",
     "compile": "npm run check-types && node esbuild.js",
     "watch": "node esbuild.js --watch",
     "bundle": "npm run check-types && node esbuild.js --production",
     "vscode:prepublish": "npm run bundle",
-    "package": "vsce package"
+    "package": "vsce package",
+    "test": "node esbuild.js --tests && node --test out/tests/*.test.js"
   },
   "devDependencies": {
     "@types/node": "^20.0.0",

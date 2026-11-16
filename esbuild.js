@@ -1,33 +1,66 @@
 const esbuild = require("esbuild");
+const { globSync } = require("node:fs");
 
 const production = process.argv.includes("--production");
 const watch = process.argv.includes("--watch");
+const tests = process.argv.includes("--tests");
+
+/** Options shared by every bundle. */
+const shared = {
+  bundle: true,
+  minify: production,
+  sourcemap: !production,
+  sourcesContent: false,
+  logLevel: "info",
+};
 
 /**
- * Bundles code/jekyl/extension.ts into out/extension.js.
- * Minifies for production; otherwise emits source maps. Pass the
- * watch flag to rebuild on change. Types are checked separately by
- * tsc, since esbuild strips them unchecked.
+ * Return the bundles to build: the extension host script, which keeps
+ * vscode external, and the REPL webview script, which runs in the
+ * browser context of the panel. With the tests flag, build only the
+ * unit tests of code/jekyl/tests, which need no VS Code.
+ */
+function bundles() {
+  if (tests) {
+    return [{
+      ...shared,
+      entryPoints: globSync("code/jekyl/tests/*.test.ts"),
+      format: "cjs",
+      platform: "node",
+      outdir: "out/tests",
+    }];
+  }
+  return [
+    {
+      ...shared,
+      entryPoints: ["code/jekyl/extension.ts"],
+      format: "cjs",
+      platform: "node",
+      outfile: "out/extension.js",
+      external: ["vscode"],
+    },
+    {
+      ...shared,
+      entryPoints: ["code/jekyl/webview/repl.ts"],
+      format: "iife",
+      platform: "browser",
+      outfile: "out/webview/repl.js",
+    },
+  ];
+}
+
+/**
+ * Builds every bundle; with the watch flag, rebuilds on change. Types
+ * are checked separately by tsc, since esbuild strips them unchecked.
  */
 async function main() {
-  const ctx = await esbuild.context({
-    entryPoints: ["code/jekyl/extension.ts"],
-    bundle: true,
-    format: "cjs",
-    platform: "node",
-    outfile: "out/extension.js",
-    external: ["vscode"],
-    minify: production,
-    sourcemap: !production,
-    sourcesContent: false,
-    logLevel: "info",
-  });
+  const contexts = await Promise.all(bundles().map(esbuild.context));
   if (watch) {
-    await ctx.watch();
-  } else {
-    await ctx.rebuild();
-    await ctx.dispose();
+    await Promise.all(contexts.map((ctx) => ctx.watch()));
+    return;
   }
+  await Promise.all(contexts.map((ctx) => ctx.rebuild()));
+  await Promise.all(contexts.map((ctx) => ctx.dispose()));
 }
 
 main().catch((err) => {

@@ -19,9 +19,11 @@
            #:+internal-error+
            #:+unauthorized+)
   ;; API
-  (:export #:read-message
+  (:export #:raise
+           #:read-message
            #:write-message
            #:make-object
+           #:make-notification
            #:make-response
            #:make-error-response
            #:message-id
@@ -191,6 +193,13 @@ A NIL RESULT is sent as JSON null."
   (make-object "jsonrpc" "2.0"
                "id" id
                "result" (or result 'null)))
+
+(defun make-notification (method params)
+  "Return a JSON-RPC notification object for METHOD with PARAMS.
+A notification has no id and is never answered."
+  (make-object "jsonrpc" "2.0"
+               "method" method
+               "params" (or params 'null)))
 
 (defun make-error-response (id code message &optional data)
   "Return a JSON-RPC error response object for request ID.

@@ -1,0 +1,290 @@
+import { LaunchOptions, LispProcess, startSlynk } from "./process";
+import { Session } from "./session";
+
+/** What slynk reports about itself; null where it reports nothing. */
+export interface ConnectionInfo {
+  implementation: {
+    type: string | null;
+    name: string | null;
+    version: string | null;
+    program: string | null;
+  };
+  pid: number | null;
+  style: string | null;
+  machine: {
+    instance: string | null;
+    type: string | null;
+    version: string | null;
+  };
+  package: { name: string | null; prompt: string | null };
+  protocolVersion: string | null;
+}
+
+/** The outcome of evaluating code. A Lisp error has ok false. */
+export interface EvalResult {
+  ok: boolean;
+  /** What the code printed. */
+  output: string;
+  /** The printed value, or null after an error. */
+  value: string | null;
+  /** The error message, or null when the code ran. */
+  error: string | null;
+}
+
+/** Something that happened that the user interface may show. */
+export type IdeEvent =
+  | { type: "connected"; info: ConnectionInfo }
+  | { type: "disconnected"; reason: string }
+  | { type: "output"; text: string }
+  | { type: "replOutput"; replId: number; text: string }
+  | {
+      type: "replPrompt";
+      replId: number;
+      packageName: string;
+      nickname: string;
+      level: number;
+      entry: number;
+      condition: string | null;
+    }
+  | {
+      type: "replValues";
+      replId: number;
+      values: { text: string; index: number }[];
+    }
+  | { type: "replAborted"; replId: number; message: string }
+  | { type: "replReadMode"; replId: number; mode: string }
+  | { type: "replCleared"; replId: number };
+
+type Params = Record<string, unknown>;
+
+function text(value: unknown): string {
+  return typeof value === "string" ? value : "";
+}
+
+function num(value: unknown): number {
+  return typeof value === "number" ? value : 0;
+}
+
+/**
+ * Turn a notification from clide into an event, or undefined when it
+ * is not one the interface knows. ide/disconnected is handled by the
+ * controller itself, as it also changes its state.
+ */
+export function parseNotification(
+  method: string,
+  params: unknown,
+): IdeEvent | undefined {
+  const p = (params ?? {}) as Params;
+  switch (method) {
+    case "ide/output":
+      return { type: "output", text: text(p.text) };
+    case "ide/repl/output":
+      return { type: "replOutput", replId: num(p.replId), text: text(p.text) };
+    case "ide/repl/prompt":
+      return {
+        type: "replPrompt",
+        replId: num(p.replId),
+        packageName: text(p.package),
+        nickname: text(p.nickname),
+        level: num(p.level),
+        entry: num(p.entry),
+        condition: typeof p.condition === "string" ? p.condition : null,
+      };
+    case "ide/repl/values": {
+      const values = Array.isArray(p.values) ? p.values : [];
+      return {
+        type: "replValues",
+        replId: num(p.replId),
+        values: values.map((value) => ({
+          text: text((value as Params).text),
+          index: num((value as Params).index),
+        })),
+      };
+    }
+    case "ide/repl/aborted":
+      return {
+        type: "replAborted",
+        replId: num(p.replId),
+        message: text(p.message),
+      };
+    case "ide/repl/readMode":
+      return {
+        type: "replReadMode",
+        replId: num(p.replId),
+        mode: text(p.mode),
+      };
+    case "ide/repl/cleared":
+      return { type: "replCleared", replId: num(p.replId) };
+    default:
+      return undefined;
+  }
+}
+
+/**
+ * The IDE's controller: starts the slynk server, has clide connect to
+ * it, and offers evaluation and REPLs. Everything that changes is
+ * reported as an IdeEvent. It knows nothing of VS Code.
+ */
+export class Ide {
+  private slynk: LispProcess | undefined;
+  private info: ConnectionInfo | undefined;
+  private connecting: Promise<ConnectionInfo> | undefined;
+  private readonly listeners = new Set<(event: IdeEvent) => void>();
+
+  /**
+   * SESSION runs clide. SLYNK is called each time a slynk server has
+   * to be started.
+   */
+  constructor(
+    private readonly session: Session,
+    private readonly slynkLaunch: () => LaunchOptions,
+  ) {
+    session.onNotification((method, params) =>
+      this.onNotification(method, params),
+    );
+    session.onExit(() => this.drop("clide exited"));
+  }
+
+  /** What slynk reported when connected, or undefined. */
+  get connection(): ConnectionInfo | undefined {
+    return this.info;
+  }
+
+  /** Call LISTENER for each event; returns a function that stops it. */
+  onEvent(listener: (event: IdeEvent) => void): () => void {
+    this.listeners.add(listener);
+    return () => this.listeners.delete(listener);
+  }
+
+  /**
+   * Start the Lisp and connect to it, if not already. Resolves with
+   * what slynk reports about itself.
+   */
+  connect(): Promise<ConnectionInfo> {
+    if (this.info) return Promise.resolve(this.info);
+    this.connecting ??= this.open().finally(() => {
+      this.connecting = undefined;
+    });
+    return this.connecting;
+  }
+
+  /** Disconnect and stop the Lisp. */
+  async disconnect(): Promise<void> {
+    const slynk = this.slynk;
+    this.slynk = undefined;
+    if (this.info) {
+      await this.session.request("ide/disconnect").catch(() => undefined);
+      this.drop("disconnected", false);
+    }
+    await slynk?.stop();
+  }
+
+  /** Evaluate CODE, a string of Lisp, in PACKAGE if given. */
+  async evaluate(code: string, packageName?: string): Promise<EvalResult> {
+    await this.connect();
+    return this.session.request<EvalResult>("ide/eval", {
+      code,
+      package: packageName,
+    });
+  }
+
+  /**
+   * Return the text of sylvesters.txt from the slynk install, or
+   * undefined when there is none.
+   */
+  async sylvesters(): Promise<string | undefined> {
+    await this.connect();
+    const reply = await this.session.request<{ text: string | null }>(
+      "ide/sylvesters",
+    );
+    return reply.text ?? undefined;
+  }
+
+  /** Open a REPL and resolve with its id. */
+  async createRepl(): Promise<number> {
+    await this.connect();
+    const reply = await this.session.request<{ replId: number }>(
+      "ide/repl/create",
+    );
+    return reply.replId;
+  }
+
+  /** Give REPL one line, or several, of input. */
+  async sendToRepl(replId: number, input: string): Promise<void> {
+    await this.session.request("ide/repl/send", { replId, text: input });
+  }
+
+  /** Interrupt what REPL is evaluating. */
+  async interruptRepl(replId: number): Promise<void> {
+    await this.session.request("ide/repl/interrupt", { replId });
+  }
+
+  /** End REPL. */
+  async closeRepl(replId: number): Promise<void> {
+    await this.session.request("ide/repl/close", { replId });
+  }
+
+  /** Disconnect, then stop slynk and clide. */
+  async stop(): Promise<void> {
+    await this.disconnect();
+    await this.session.stop();
+  }
+
+  private async open(): Promise<ConnectionInfo> {
+    await this.session.ensure();
+    const slynk = this.slynk ?? (await this.startSlynkProcess());
+    try {
+      const info = await this.session.request<ConnectionInfo>("ide/connect", {
+        port: slynk.port,
+      });
+      this.info = info;
+      this.emit({ type: "connected", info });
+      return info;
+    } catch (error) {
+      this.slynk = undefined;
+      await slynk.stop();
+      throw error;
+    }
+  }
+
+  private async startSlynkProcess(): Promise<LispProcess> {
+    const slynk = await startSlynk(this.slynkLaunch());
+    this.slynk = slynk;
+    void slynk.exited.then(() => {
+      if (this.slynk === slynk) {
+        this.slynk = undefined;
+        this.drop("slynk exited");
+      }
+    });
+    return slynk;
+  }
+
+  private onNotification(method: string, params: unknown): void {
+    if (method === "ide/disconnected") {
+      const reason = text((params as Params | undefined)?.reason);
+      this.drop(reason || "connection closed");
+      return;
+    }
+    const event = parseNotification(method, params);
+    if (event) this.emit(event);
+  }
+
+  /**
+   * Forget the connection and report REASON. The slynk process, if
+   * still running, is stopped unless STOP is false.
+   */
+  private drop(reason: string, stop = true): void {
+    const had = this.info !== undefined;
+    this.info = undefined;
+    if (stop && this.slynk) {
+      const slynk = this.slynk;
+      this.slynk = undefined;
+      void slynk.stop();
+    }
+    if (had) this.emit({ type: "disconnected", reason });
+  }
+
+  private emit(event: IdeEvent): void {
+    this.listeners.forEach((listener) => listener(event));
+  }
+}

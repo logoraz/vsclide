@@ -18,6 +18,8 @@ export const ErrorCode = {
   InvalidParams: -32602,
   InternalError: -32603,
   Unauthorized: -32001,
+  NotConnected: -32002,
+  SlynkFailure: -32003,
 } as const;
 
 /** An error reply from clide. */
@@ -79,9 +81,14 @@ interface Pending {
   reject: (reason: Error) => void;
 }
 
+/** Called for each notification clide sends. */
+export type NotificationListener = (method: string, params: unknown) => void;
+
 /**
  * JSON-RPC client over one loopback connection to clide.
  * Requests resolve with the reply's result or reject with RpcError.
+ * Notifications from clide go to the listeners added with
+ * onNotification.
  */
 export class RpcClient {
   /** Resolves when the connection has closed. */
@@ -90,6 +97,7 @@ export class RpcClient {
   private nextId = 1;
   private pending = new Map<number, Pending>();
   private buffer: Buffer = Buffer.alloc(0);
+  private listeners = new Set<NotificationListener>();
 
   private constructor(private readonly socket: net.Socket) {
     this.closed = new Promise((resolve) => socket.once("close", resolve));
@@ -131,6 +139,12 @@ export class RpcClient {
     });
   }
 
+  /** Call LISTENER for each notification; return a function that stops it. */
+  onNotification(listener: NotificationListener): () => void {
+    this.listeners.add(listener);
+    return () => this.listeners.delete(listener);
+  }
+
   /** Close the connection; outstanding requests are rejected. */
   close(): void {
     this.socket.destroy();
@@ -150,6 +164,16 @@ export class RpcClient {
   }
 
   private dispatch(message: JsonRpcMessage): void {
+    if (typeof message.method === "string" && message.id === undefined) {
+      for (const listener of this.listeners) {
+        try {
+          listener(message.method, message.params);
+        } catch {
+          // A faulty listener must not stop the others or the decoder.
+        }
+      }
+      return;
+    }
     if (typeof message.id !== "number") return;
     const pending = this.pending.get(message.id);
     if (!pending) return;

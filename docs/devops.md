@@ -23,7 +23,8 @@ Development is two loops that meet at the Extension Development Host:
 
 ### Scripts
 
-- `check-types`: `tsc --noEmit -p ./code/jekyl`
+- `check-types`: `tsc --noEmit` for `code/jekyl` and its `webview`
+- `test`: bundle `code/jekyl/tests` and run them with `node --test`
 - `compile`: type-check, then bundle with source maps
 - `watch`: esbuild in watch mode (no type-check)
 - `bundle`: type-check, then minified production bundle
@@ -33,7 +34,7 @@ Development is two loops that meet at the Extension Development Host:
 ### Files
 
 - `esbuild.js` at the repo root bundles `code/jekyl/extension.ts` into
-  `out/extension.js`
+  `out/extension.js` and the REPL page script into `out/webview/repl.js`
 - `code/jekyl/tsconfig.json` is for type-checking only (`noEmit`)
 - `out/` and `node_modules/` are git-ignored
 

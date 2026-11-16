@@ -1,5 +1,5 @@
 import { ClideProcess, LaunchOptions, startClide } from "./process";
-import { RpcClient } from "../lib/jsonrpc";
+import { NotificationListener, RpcClient } from "../lib/jsonrpc";
 
 /**
  * One clide process and its authenticated connection, started on
@@ -8,8 +8,11 @@ import { RpcClient } from "../lib/jsonrpc";
 export class Session {
   private starting: Promise<RpcClient> | undefined;
   private current: ClideProcess | undefined;
+  private readonly notificationListeners = new Set<NotificationListener>();
+  private readonly exitListeners = new Set<() => void>();
 
-  constructor(private readonly options: LaunchOptions) {}
+  /** LAUNCH is called each time clide has to be started. */
+  constructor(private readonly launch: () => LaunchOptions) {}
 
   /** Return the connected client, starting clide if needed. */
   ensure(): Promise<RpcClient> {
@@ -20,6 +23,27 @@ export class Session {
       });
     }
     return this.starting;
+  }
+
+  /** Start clide if needed, send a request and return its result. */
+  async request<T = unknown>(method: string, params?: unknown): Promise<T> {
+    const client = await this.ensure();
+    return client.request<T>(method, params);
+  }
+
+  /**
+   * Call LISTENER for each notification clide sends, across restarts.
+   * Returns a function that removes the listener.
+   */
+  onNotification(listener: NotificationListener): () => void {
+    this.notificationListeners.add(listener);
+    return () => this.notificationListeners.delete(listener);
+  }
+
+  /** Call LISTENER when the clide process exits for any reason. */
+  onExit(listener: () => void): () => void {
+    this.exitListeners.add(listener);
+    return () => this.exitListeners.delete(listener);
   }
 
   /** Close the connection and stop the process. */
@@ -34,15 +58,21 @@ export class Session {
   }
 
   private async start(): Promise<RpcClient> {
-    const clide = await startClide(this.options);
+    const clide = await startClide(this.launch());
     this.current = clide;
     void clide.exited.then(() => {
       if (this.current === clide) {
         this.current = undefined;
         this.starting = undefined;
+        this.exitListeners.forEach((listener) => listener());
       }
     });
     const client = await RpcClient.connect(clide.port);
+    client.onNotification((method, params) => {
+      this.notificationListeners.forEach((listener) =>
+        listener(method, params),
+      );
+    });
     try {
       await client.request("initialize", { token: clide.token });
     } catch (error) {

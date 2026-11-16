@@ -15,6 +15,7 @@
                 #:make-server
                 #:server-port
                 #:register-method
+                #:broadcast
                 #:start-server
                 #:stop-server)
   (:export #:base-suite)
@@ -46,6 +47,11 @@ its port as the second value."
                                      (declare (ignore params))
                                      (sleep 1)
                                      "slow-done"))
+    (register-method server "emit"
+                     (lambda (params)
+                       (declare (ignore params))
+                       (broadcast server "event" (make-object "n" 1))
+                       "emitted"))
     (values server (start-server server))))
 
 (defmacro with-test-server ((port) &body body)
@@ -144,3 +150,38 @@ stream."
                             (gethash "result" (read-message stream-a)))))
           (socket-close socket-a)
           (socket-close socket-b))))))
+
+(test requests-overlap-on-one-connection
+  "A fast request is answered while a slow one on the same connection
+is still running."
+  (with-test-server (port)
+    (multiple-value-bind (socket stream) (connect port)
+      (unwind-protect
+           (progn
+             (initialize stream (token))
+             (write-message stream (request 2 "slow"))
+             (write-message stream (request 3 "ping"))
+             (let ((first (read-message stream))
+                   (second (read-message stream)))
+               (is (= 3 (gethash "id" first)))
+               (is (string= "pong" (gethash "result" first)))
+               (is (= 2 (gethash "id" second)))
+               (is (string= "slow-done" (gethash "result" second)))))
+        (socket-close socket)))))
+
+(test broadcast-reaches-ready-clients
+  "A notification comes before the reply of the method that sent it,
+and has no id."
+  (with-test-server (port)
+    (multiple-value-bind (socket stream) (connect port)
+      (unwind-protect
+           (progn
+             (initialize stream (token))
+             (write-message stream (request 2 "emit"))
+             (let ((notification (read-message stream))
+                   (reply (read-message stream)))
+               (is (string= "event" (gethash "method" notification)))
+               (is (null (gethash "id" notification)))
+               (is (= 1 (gethash "n" (gethash "params" notification))))
+               (is (string= "emitted" (gethash "result" reply)))))
+        (socket-close socket)))))

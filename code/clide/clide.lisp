@@ -4,6 +4,8 @@
                 #:make-server
                 #:register-method
                 #:start-server)
+  (:import-from :clide/base/ide
+                #:register-ide-methods)
   (:export #:main)
   (:documentation "Entry point for the clide process."))
 
@@ -13,11 +15,12 @@
 ;;; Code:
 
 (defun register-builtin-methods (server)
-  "Register the built-in methods on SERVER, currently just ping."
+  "Register the built-in methods on SERVER: ping and the ide/ methods."
   (register-method server "ping"
                    (lambda (params)
                      (declare (ignore params))
-                     "pong")))
+                     "pong"))
+  (register-ide-methods server))
 
 (defun log-to-stderr (control &rest args)
   "Write a formatted log line to standard error.

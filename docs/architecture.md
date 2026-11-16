@@ -32,13 +32,16 @@ vsclide/
 │   │   ├── clide.asd         subsystems: clide/tests, clide/docs planned
 │   │   ├── clide.lisp        entry point: main
 │   │   ├── version.sexp
-│   │   ├── base/             server.lisp
-│   │   ├── lib/              ansi-color.lisp, jsonrpc.lisp
+│   │   ├── base/             server, slynk-client, ide
+│   │   ├── lib/              ansi-color, jsonrpc, slynk-wire
 │   │   └── tests/
 │   └── jekyl/                TypeScript side (extension host)
 │       ├── tsconfig.json     type-check only (noEmit)
-│       ├── base/
-│       ├── lib/
+│       ├── extension.ts      activation and wiring
+│       ├── base/             process, session, launch, ide
+│       ├── lib/              jsonrpc, forms
+│       ├── interface/        commands, results, status, repl
+│       ├── webview/          REPL page script (own tsconfig, DOM)
 │       └── tests/
 ├── data/
 │   └── graphics/
@@ -145,6 +148,26 @@ vsclide/
     for the modules the server has not loaded yet
   - Modules already loaded are skipped
 
+### Slynk connection and the ide methods
+
+- clide is a slynk client; `base/slynk-client.lisp` owns the socket
+  - Wire codec in `lib/slynk-wire.lisp`: a safe reader that never
+    interns or evaluates; foreign symbols stay structs
+  - Prompts slynk sends (`:y-or-n-p` and kin) are answered with nil
+    so no request hangs; `:debug` is auto-aborted
+- jekyl starts the slynk server itself with
+  `slynk:create-server :port 0 :dont-close t`, not `start-server`
+  (which enables Emacs-only output redirection)
+- `base/ide.lisp` registers `ide/*` methods and turns slynk events
+  into notifications; the header comment lists all of them
+- Error codes: -32002 not connected, -32003 slynk failure
+- Evaluation binds `slynk::*echo-number-alist*` to nil so values are
+  plain; REPL text is kept verbatim, with slynk's number decoration
+- REPLs use `slynk/mrepl`, one channel per REPL; the next input is
+  sent only after the prompt, to avoid slynk dropping it
+- Notifications for a REPL can precede the reply that names it
+- EGCL is untested with slynk-gray and mrepl
+
 ## First-launch build
 
 - On activation, check for a build matching clide version and
@@ -168,9 +191,14 @@ vsclide/
 - Logic is segregated into `base/` and `lib/`, mirroring clide
 - Responsibilities to place within them: process supervision, command
   registration, settings, views
-- Entry point `code/jekyl/extension.ts` (template only)
+- Entry point `code/jekyl/extension.ts` wires the pieces together
+  - `base/ide.ts` is the controller; it knows nothing of VS Code
+  - `interface/` holds everything that touches the VS Code API
+  - `lib/forms.ts` finds forms in text (top level, before cursor,
+    in-package); a stand-in for the future editing arm
 - Build follows the official bundling guidance, adapted to our layout:
   - esbuild bundles `code/jekyl/extension.ts` into `out/extension.js`
+    and `webview/repl.ts` into `out/webview/repl.js`
   - `main` in `package.json` still points at `./out/extension.js`
   - `tsc --noEmit` only type-checks; esbuild strips types unchecked
   - `vscode` is external; output is CommonJS for Node
@@ -187,12 +215,22 @@ vsclide/
 
 ## REPL UI
 
-- A panel view container (`viewsContainers.panel`) with a webview view
+- A panel view container (`viewsContainers.panel`, titled mREPL) with
+  a webview view; the tab list on the right appears with two REPLs
+  - Enter sends, Shift+Enter adds a line, Up and Down recall history
+  - Interrupt button and Ctrl+C
+  - `view/title` buttons: new, clear, close
+- The panel opens empty, as the terminal does; `VSCLIDE: Open mREPL`
+  focuses it and opens a first REPL
+- A new mREPL starts with a Sylvester banner
+  - SLY's art and quips are GPL, so nothing is bundled
+  - clide reads `sylvesters.txt` from the user's slynk install
+    (`ide/sylvesters`); words of encouragement are original
+  - Without the file only the words of encouragement are shown
 - Plain TypeScript in the webview; no React needed
 - Mimics a slynk mrepl: one REPL per channel
 - A list on the right of the panel, like the terminal tabs list
   - The native list is internal to VS Code, so we build our own
-- `view/title` buttons for clear, new, kill
 - The REPL tab shows when a process starts, via a `when` context flag
 
 ## Packaging and distribution
