@@ -255,7 +255,8 @@ export class ReplView implements vscode.WebviewViewProvider {
   .input { color: var(--vscode-terminal-ansiGreen); }
   .value { color: var(--vscode-terminal-ansiCyan); }
   .error { color: var(--vscode-errorForeground); }
-  .banner, .notice { color: var(--vscode-descriptionForeground); }
+  .banner { color: #ff69b4; }
+  .notice { color: var(--vscode-descriptionForeground); }
   .notice { font-style: italic; }
   #bar { display: flex; align-items: flex-start; gap: 6px; padding: 4px 8px;
          border-top: 1px solid var(--vscode-panel-border); }

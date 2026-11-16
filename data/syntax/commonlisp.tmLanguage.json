@@ -1,0 +1,250 @@
+{
+  "$schema": "https://raw.githubusercontent.com/martinring/tmlanguage/master/tmlanguage.json",
+  "name": "Common Lisp",
+  "scopeName": "source.commonlisp",
+  "patterns": [
+    {
+      "include": "#form"
+    }
+  ],
+  "repository": {
+    "form": {
+      "patterns": [
+        {
+          "include": "#comment"
+        },
+        {
+          "include": "#string"
+        },
+        {
+          "include": "#uninterned"
+        },
+        {
+          "include": "#reader-macro"
+        },
+        {
+          "include": "#character"
+        },
+        {
+          "include": "#number"
+        },
+        {
+          "include": "#definition"
+        },
+        {
+          "include": "#list"
+        },
+        {
+          "include": "#lambda-keyword"
+        },
+        {
+          "include": "#keyword"
+        },
+        {
+          "include": "#package-qualified"
+        },
+        {
+          "include": "#constant"
+        },
+        {
+          "include": "#special-variable"
+        },
+        {
+          "include": "#bar-symbol"
+        }
+      ]
+    },
+    "comment": {
+      "patterns": [
+        {
+          "name": "comment.line.semicolon.commonlisp",
+          "match": ";.*$"
+        },
+        {
+          "name": "comment.block.commonlisp",
+          "begin": "#\\|",
+          "end": "\\|#",
+          "patterns": [
+            {
+              "include": "#comment-block-nested"
+            }
+          ]
+        }
+      ]
+    },
+    "comment-block-nested": {
+      "name": "comment.block.commonlisp",
+      "begin": "#\\|",
+      "end": "\\|#",
+      "patterns": [
+        {
+          "include": "#comment-block-nested"
+        }
+      ]
+    },
+    "string": {
+      "name": "string.quoted.double.commonlisp",
+      "begin": "\"",
+      "end": "\"",
+      "patterns": [
+        {
+          "name": "constant.character.escape.commonlisp",
+          "match": "\\\\."
+        }
+      ]
+    },
+    "character": {
+      "name": "constant.character.commonlisp",
+      "match": "#\\\\(?:[A-Za-z][A-Za-z0-9_+-]+|.)"
+    },
+    "number": {
+      "patterns": [
+        {
+          "name": "constant.numeric.radix.commonlisp",
+          "match": "(?i)#(?:[0-9]+r[0-9a-z]+|x[0-9a-f/]+|b[01/]+|o[0-7/]+)(?=[\\s()]|$)"
+        },
+        {
+          "name": "constant.numeric.commonlisp",
+          "match": "(?<![^\\s()'\\\"`,;])[+-]?(?:[0-9]+/[0-9]+|[0-9]*\\.[0-9]+(?:[esdfl][+-]?[0-9]+)?|[0-9]+\\.?(?:[esdfl][+-]?[0-9]+)?)(?=[\\s()]|$)"
+        }
+      ]
+    },
+    "reader-macro": {
+      "patterns": [
+        {
+          "name": "keyword.operator.function.commonlisp",
+          "match": "#'"
+        },
+        {
+          "name": "keyword.control.conditional.commonlisp",
+          "match": "#[+-]"
+        },
+        {
+          "name": "keyword.operator.commonlisp",
+          "match": "#\\.|#P(?=\\\")|#p(?=\\\")|#[0-9]*[Aa](?=\\()|#[0-9]*(?=\\()|#\\*(?=[01])"
+        },
+        {
+          "name": "keyword.operator.quote.commonlisp",
+          "match": "'|`|,@|,"
+        }
+      ]
+    },
+    "definition": {
+      "patterns": [
+        {
+          "match": "(?i)(?<=\\()\\s*((?:(?:cl|common-lisp):)?defpackage|(?:uiop:)?define-package)\\s+(?:(:[^\\s()'\\\"`,;|]+)|(#:[^\\s()'\\\"`,;|]+)|([^\\s()'\\\"`,;|]+))",
+          "captures": {
+            "1": {
+              "name": "storage.type.class.commonlisp"
+            },
+            "2": {
+              "name": "entity.name.namespace.defined.keyword.commonlisp"
+            },
+            "3": {
+              "name": "entity.name.namespace.defined.uninterned.commonlisp"
+            },
+            "4": {
+              "name": "entity.name.namespace.defined.commonlisp"
+            }
+          }
+        },
+        {
+          "match": "(?i)(?<=\\()\\s*((?:(?:cl|common-lisp):)?(?:defun|defmacro|defgeneric|defmethod|define-compiler-macro|define-modify-macro|defsetf|define-setf-expander|define-method-combination))\\s+(\\(\\s*setf\\s+[^\\s()]+\\s*\\)|[^\\s()'\\\"`,;|]+)",
+          "captures": {
+            "1": {
+              "name": "storage.type.function.commonlisp"
+            },
+            "2": {
+              "name": "entity.name.function.commonlisp"
+            }
+          }
+        },
+        {
+          "match": "(?i)(?<=\\()\\s*((?:(?:cl|common-lisp):)?(?:defvar|defparameter|defconstant|define-symbol-macro))\\s+([^\\s()'\\\"`,;|]+)",
+          "captures": {
+            "1": {
+              "name": "storage.type.commonlisp"
+            },
+            "2": {
+              "name": "entity.name.variable.commonlisp"
+            }
+          }
+        },
+        {
+          "match": "(?i)(?<=\\()\\s*((?:(?:cl|common-lisp):)?(?:defclass|defstruct|define-condition|deftype|defsystem|define-[a-z0-9-]+))\\s+\\(?\\s*((?:#?::?)?[^\\s()'\\\"`,;|]+)",
+          "captures": {
+            "1": {
+              "name": "storage.type.class.commonlisp"
+            },
+            "2": {
+              "name": "entity.name.type.commonlisp"
+            }
+          }
+        }
+      ]
+    },
+    "list": {
+      "patterns": [
+        {
+          "match": "(?i)(?<=\\()\\s*(?:(?:cl|common-lisp):)?(?:block|catch|eval-when|flet|function|go|if|labels|lambda|let\\*?|load-time-value|locally|macrolet|multiple-value-call|multiple-value-prog1|progn|progv|quote|return-from|setq|symbol-macrolet|tagbody|the|throw|unwind-protect)(?=[\\s()]|$)",
+          "name": "keyword.control.commonlisp"
+        },
+        {
+          "match": "(?i)(?<=\\()\\s*(?:(?:cl|common-lisp):)?(?:and|assert|case|ccase|check-type|cond|ctypecase|declaim|in-package|declare|destructuring-bind|do\\*?|do-all-symbols|do-external-symbols|do-symbols|dolist|dotimes|ecase|error|etypecase|handler-bind|handler-case|ignore-errors|loop|or|multiple-value-bind|multiple-value-list|multiple-value-setq|nth-value|otherwise|pop|prog[12*]?|push|pushnew|restart-bind|restart-case|return|setf|signal|typecase|unless|warn|when|while|with-accessors|with-condition-restarts|with-open-file|with-open-stream|with-output-to-string|with-input-from-string|with-slots|with-standard-io-syntax|with-simple-restart|with-compilation-unit|with-package-iterator|with-hash-table-iterator|incf|decf|define-symbol-macro|ignore|ignorable|dynamic-extent|inline|notinline|optimize|special|type|ftype)(?=[\\s()]|$)",
+          "name": "keyword.control.commonlisp"
+        },
+        {
+          "name": "punctuation.section.expression.begin.commonlisp",
+          "match": "\\("
+        },
+        {
+          "name": "punctuation.section.expression.end.commonlisp",
+          "match": "\\)"
+        }
+      ]
+    },
+    "lambda-keyword": {
+      "name": "storage.modifier.lambda-list.commonlisp",
+      "match": "(?i)&(?:optional|rest|key|body|aux|allow-other-keys|environment|whole|restart)(?=[\\s()]|$)"
+    },
+    "keyword": {
+      "name": "constant.other.keyword.commonlisp",
+      "match": "(?<![^\\s()'\\\"`,;#])::?[^\\s()'\\\"`,;|]+"
+    },
+    "package-qualified": {
+      "match": "([^\\s()'\\\"`,;|:#][^\\s()'\\\"`,;|:]*)(::?)(?=[^\\s()'\\\"`,;])",
+      "captures": {
+        "1": {
+          "name": "entity.name.namespace.commonlisp"
+        },
+        "2": {
+          "name": "punctuation.separator.package.commonlisp"
+        }
+      }
+    },
+    "constant": {
+      "patterns": [
+        {
+          "name": "constant.language.commonlisp",
+          "match": "(?i)(?<![^\\s()'\\\"`,;])(?:t|nil)(?=[\\s()]|$)"
+        },
+        {
+          "name": "constant.other.commonlisp",
+          "match": "(?<![^\\s()'\\\"`,;])\\+[^\\s()'\\\"`,;|+]+\\+(?=[\\s()]|$)"
+        }
+      ]
+    },
+    "special-variable": {
+      "name": "variable.other.special.commonlisp",
+      "match": "(?<![^\\s()'\\\"`,;])\\*[^\\s()'\\\"`,;|*]+\\*(?=[\\s()]|$)"
+    },
+    "bar-symbol": {
+      "name": "variable.other.commonlisp",
+      "match": "\\|[^|]*\\|"
+    },
+    "uninterned": {
+      "name": "constant.other.uninterned.commonlisp",
+      "match": "#:[^\\s()'\\\"`,;|]+"
+    }
+  }
+}

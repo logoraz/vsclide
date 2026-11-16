@@ -2,7 +2,7 @@
   "name": "vsclide",
   "displayName": ":VSCLIDE",
   "description": "A full-powered Common Lisp IDE for VS Code.",
-  "version": "0.0.2",
+  "version": "0.0.3",
   "publisher": "locutus",
   "license": "MIT",
   "repository": {
@@ -41,7 +41,8 @@
           ".asd",
           ".lsp",
           ".cl"
-        ]
+        ],
+        "configuration": "./data/syntax/language-configuration.json"
       }
     ],
     "commands": [
@@ -173,6 +174,169 @@
           "name": "mREPL"
         }
       ]
+    },
+    "grammars": [
+      {
+        "language": "commonlisp",
+        "scopeName": "source.commonlisp",
+        "path": "./data/syntax/commonlisp.tmLanguage.json"
+      }
+    ],
+    "configurationDefaults": {
+      "editor.tokenColorCustomizations": {
+        "textMateRules": [
+          {
+            "scope": "comment.block.commonlisp",
+            "settings": {
+              "foreground": "#707070"
+            }
+          },
+          {
+            "scope": "comment.line.semicolon.commonlisp",
+            "settings": {
+              "foreground": "#707070"
+            }
+          },
+          {
+            "scope": "constant.character.commonlisp",
+            "settings": {
+              "foreground": "#e8b068"
+            }
+          },
+          {
+            "scope": "constant.character.escape.commonlisp",
+            "settings": {
+              "foreground": "#e8b068"
+            }
+          },
+          {
+            "scope": "constant.numeric.commonlisp",
+            "settings": {
+              "foreground": "#e8b068"
+            }
+          },
+          {
+            "scope": "constant.numeric.radix.commonlisp",
+            "settings": {
+              "foreground": "#e8b068"
+            }
+          },
+          {
+            "scope": "constant.other.keyword.commonlisp",
+            "settings": {
+              "foreground": "#b8d0f8"
+            }
+          },
+          {
+            "scope": "constant.other.uninterned.commonlisp",
+            "settings": {
+              "foreground": "#b0c8f0"
+            }
+          },
+          {
+            "scope": "entity.name.function.commonlisp",
+            "settings": {
+              "foreground": "#80a8c8"
+            }
+          },
+          {
+            "scope": "entity.name.namespace.commonlisp",
+            "settings": {
+              "foreground": "#b8d0f8"
+            }
+          },
+          {
+            "scope": "entity.name.namespace.defined.commonlisp",
+            "settings": {
+              "foreground": "#80a8c8"
+            }
+          },
+          {
+            "scope": "entity.name.namespace.defined.keyword.commonlisp",
+            "settings": {
+              "foreground": "#f8d078"
+            }
+          },
+          {
+            "scope": "entity.name.namespace.defined.uninterned.commonlisp",
+            "settings": {
+              "foreground": "#80a8c8"
+            }
+          },
+          {
+            "scope": "entity.name.type.commonlisp",
+            "settings": {
+              "foreground": "#80a8c8"
+            }
+          },
+          {
+            "scope": "entity.name.variable.commonlisp",
+            "settings": {
+              "foreground": "#80a8c8"
+            }
+          },
+          {
+            "scope": "keyword.control.commonlisp",
+            "settings": {
+              "foreground": "#e0a8e8"
+            }
+          },
+          {
+            "scope": "keyword.control.conditional.commonlisp",
+            "settings": {
+              "foreground": "#e0a8e8"
+            }
+          },
+          {
+            "scope": "keyword.operator.commonlisp",
+            "settings": {
+              "foreground": "#b0b0b0"
+            }
+          },
+          {
+            "scope": "keyword.operator.function.commonlisp",
+            "settings": {
+              "foreground": "#b0b0b0"
+            }
+          },
+          {
+            "scope": "keyword.operator.quote.commonlisp",
+            "settings": {
+              "foreground": "#b0b0b0"
+            }
+          },
+          {
+            "scope": "storage.modifier.lambda-list.commonlisp",
+            "settings": {
+              "foreground": "#e8b068"
+            }
+          },
+          {
+            "scope": "storage.type.class.commonlisp",
+            "settings": {
+              "foreground": "#e0a8e8"
+            }
+          },
+          {
+            "scope": "storage.type.commonlisp",
+            "settings": {
+              "foreground": "#e0a8e8"
+            }
+          },
+          {
+            "scope": "storage.type.function.commonlisp",
+            "settings": {
+              "foreground": "#e0a8e8"
+            }
+          },
+          {
+            "scope": "string.quoted.double.commonlisp",
+            "settings": {
+              "foreground": "#b0c870"
+            }
+          }
+        ]
+      }
     }
   },
   "scripts": {
@@ -189,6 +353,8 @@
     "@types/vscode": "^1.85.0",
     "@vscode/vsce": "^3.0.0",
     "esbuild": "^0.25.0",
-    "typescript": "^5.4.0"
+    "typescript": "^5.4.0",
+    "vscode-oniguruma": "^2.0.1",
+    "vscode-textmate": "^9.3.2"
   }
 }

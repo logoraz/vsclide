@@ -28,6 +28,8 @@ function bundles() {
       format: "cjs",
       platform: "node",
       outdir: "out/tests",
+      // Resolved at run time, since it locates its own wasm file.
+      external: ["vscode-oniguruma"],
     }];
   }
   return [

@@ -233,6 +233,37 @@ vsclide/
   - The native list is internal to VS Code, so we build our own
 - The REPL tab shows when a process starts, via a `when` context flag
 
+## Syntax highlighting
+
+- vsclide contributes its own `commonlisp` language, so no other
+  extension is needed for it
+  - `data/syntax/commonlisp.tmLanguage.json`: the TextMate grammar
+  - `data/syntax/language-configuration.json`: comments, brackets,
+    auto-closing pairs and the word pattern
+- Layers, from first to last
+  - Static: the TextMate grammar; no Lisp process needed
+  - Structural: the climacs-like arm, immediate and Lisp-free
+  - Dynamic: the slynk arm, as semantic tokens over the layers below
+- The grammar scopes definers, special operators, standard macros,
+  keywords, specials, constants, packages, numbers, characters and
+  reader macros
+- It does not scope ordinary calls; telling a function from a variable
+  needs the semantic layer, and guessing colors parameters wrongly
+- Package names get three scopes
+  - `:name` in `defpackage`: `entity.name.namespace.defined.keyword`
+  - `#:name` in `defpackage`: `entity.name.namespace.defined.uninterned`
+  - elsewhere: `constant.other.keyword` and `constant.other.uninterned`
+- Colors ship as `configurationDefaults` in `package.json`
+  - They set `editor.tokenColorCustomizations` rules only
+  - No theme is contributed, so the user's theme, background and
+    window colors stay as they are
+  - Rules use the exact scopes the grammar emits, so they touch only
+    Lisp and outrank a theme's shorter scopes (the longest scope wins)
+  - The palette follows the maintainer's Lem setup
+  - A user's own `editor.tokenColorCustomizations` takes precedence
+- Tests tokenize samples with vscode-textmate and resolve theme colors
+  (`tests/grammar.test.ts`, `tests/colors.test.ts`, `tests/textmate.ts`)
+
 ## Packaging and distribution
 
 - Launch target: Linux only, for now
