@@ -3,6 +3,7 @@ import { Ide } from "./base/ide";
 import { LaunchContext, clideLaunch, slynkLaunch } from "./base/launch";
 import { Session } from "./base/session";
 import { registerCommands } from "./interface/commands";
+import { DebugPanel } from "./interface/debug-panel";
 import { ReplView, VIEW_ID } from "./interface/repl";
 import { Results } from "./interface/results";
 import { Status } from "./interface/status";
@@ -50,10 +51,14 @@ export function activate(context: vscode.ExtensionContext): void {
   const status = new Status(ide);
   const results = new Results(output);
   const repl = new ReplView(context.extensionUri, ide);
+  const panel = new DebugPanel(context.extensionUri, ide, (debugging) =>
+    status.setDebugging(debugging),
+  );
   context.subscriptions.push(
     status,
     results,
     repl,
+    panel,
     vscode.window.registerWebviewViewProvider(VIEW_ID, repl, {
       webviewOptions: { retainContextWhenHidden: true },
     }),
@@ -65,7 +70,7 @@ export function activate(context: vscode.ExtensionContext): void {
         }
       }),
     ),
-    ...registerCommands({ ide, results, status, repl, output }),
+    ...registerCommands({ ide, results, status, repl, panel, output }),
   );
 }
 

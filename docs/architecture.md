@@ -32,16 +32,20 @@ vsclide/
 │   │   ├── clide.asd         subsystems: clide/tests, clide/docs planned
 │   │   ├── clide.lisp        entry point: main
 │   │   ├── version.sexp
-│   │   ├── base/             server, slynk-client, ide
+│   │   ├── base/             server, slynk-client, ide, debugger,
+│   │   │                     inspector
 │   │   ├── lib/              ansi-color, jsonrpc, slynk-wire
 │   │   └── tests/
 │   └── jekyl/                TypeScript side (extension host)
 │       ├── tsconfig.json     type-check only (noEmit)
 │       ├── extension.ts      activation and wiring
-│       ├── base/             process, session, launch, ide
-│       ├── lib/              jsonrpc, forms
-│       ├── interface/        commands, results, status, repl
-│       ├── webview/          REPL page script (own tsconfig, DOM)
+│       ├── base/             process, session, launch, ide, debugger,
+│       │                     inspector, panel
+│       ├── lib/              jsonrpc, forms, source-location
+│       ├── interface/        commands, results, status, repl,
+│       │                     debug-panel
+│       ├── webview/          REPL and debugger page scripts (own
+│       │                     tsconfig, DOM)
 │       └── tests/
 ├── data/
 │   └── graphics/
@@ -154,7 +158,8 @@ vsclide/
   - Wire codec in `lib/slynk-wire.lisp`: a safe reader that never
     interns or evaluates; foreign symbols stay structs
   - Prompts slynk sends (`:y-or-n-p` and kin) are answered with nil
-    so no request hangs; `:debug` is auto-aborted
+    so no request hangs; `:debug` opens the debugger (below)
+    and is auto-aborted only when no handler is registered
 - jekyl starts the slynk server itself with
   `slynk:create-server :port 0 :dont-close t`, not `start-server`
   (which enables Emacs-only output redirection)
@@ -198,7 +203,8 @@ vsclide/
     in-package); a stand-in for the future editing arm
 - Build follows the official bundling guidance, adapted to our layout:
   - esbuild bundles `code/jekyl/extension.ts` into `out/extension.js`
-    and `webview/repl.ts` into `out/webview/repl.js`
+    and the two page scripts `webview/repl.ts` and
+    `webview/debugger.ts` into `out/webview/`
   - `main` in `package.json` still points at `./out/extension.js`
   - `tsc --noEmit` only type-checks; esbuild strips types unchecked
   - `vscode` is external; output is CommonJS for Node
@@ -232,6 +238,37 @@ vsclide/
 - A list on the right of the panel, like the terminal tabs list
   - The native list is internal to VS Code, so we build our own
 - The REPL tab shows when a process starts, via a `when` context flag
+
+## Debugger and inspector
+
+- One webview panel beside the editor with two tabs, Debugger and
+  Inspector; the bottom mREPL stays for the REPL only
+- clide: `base/debugger.lisp` and `base/inspector.lisp` register
+  their `ide/debug/*` and `ide/inspect/*` methods through
+  `register-ide-method`, and their slynk event handlers through
+  `register-event-handler`; `base/ide.lisp` holds the tables
+  - `:debug` becomes `ide/debug/open`; `:debug-activate`,
+    `:debug-return` and `:debug-condition` follow
+  - Debug requests go to the debugging thread by its id
+  - Restart, abort, step and kin are fire and forget: slynk answers
+    them with events, not replies
+  - `ide/eval` takes `debug: true`, so errors in evaluated code open
+    the debugger and the call returns when it is left; REPL errors
+    open it too
+  - Frame disassembly is left out; the SBCL backend lacks it
+  - Inspector state lives in slynk, one inspector per connection;
+    `more` is true when the next part is beyond the range loaded
+- jekyl: `base/debugger.ts` and `base/inspector.ts` hold models that
+  only follow events and replies; `base/panel.ts` builds the state
+  the page draws; `interface/debug-panel.ts` owns the webview
+  - The page keeps no state of its own; it gets the whole state after
+    each change and draws it; inputs persist across redraws
+  - Digit keys 0 to 9 invoke restarts, as in SLY
+  - Frame source: `lib/source-location.ts` maps the slynk location
+    to an offset; a snippet wins over a position that has gone stale
+  - Context key `vsclide.debugging` and the status bar follow the
+    open levels
+- Deferred: stickers, source line breakpoints
 
 ## Syntax highlighting
 

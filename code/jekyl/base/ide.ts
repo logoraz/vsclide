@@ -1,3 +1,17 @@
+import {
+  DebugLevel,
+  FrameDetails,
+  Frame,
+  parseFrameDetails,
+  parseFrames,
+  parseLevel,
+} from "./debugger";
+import {
+  Inspected,
+  Range,
+  parseInspected,
+  parseRange,
+} from "./inspector";
 import { LaunchOptions, LispProcess, startSlynk } from "./process";
 import { Session } from "./session";
 
@@ -53,7 +67,11 @@ export type IdeEvent =
     }
   | { type: "replAborted"; replId: number; message: string }
   | { type: "replReadMode"; replId: number; mode: string }
-  | { type: "replCleared"; replId: number };
+  | { type: "replCleared"; replId: number }
+  | { type: "debugOpen"; level: DebugLevel }
+  | { type: "debugActivate"; threadId: number; level: number }
+  | { type: "debugReturn"; threadId: number; level: number; stepping: boolean }
+  | { type: "debugCondition"; threadId: number; message: string };
 
 type Params = Record<string, unknown>;
 
@@ -115,6 +133,27 @@ export function parseNotification(
       };
     case "ide/repl/cleared":
       return { type: "replCleared", replId: num(p.replId) };
+    case "ide/debug/open":
+      return { type: "debugOpen", level: parseLevel(params) };
+    case "ide/debug/activate":
+      return {
+        type: "debugActivate",
+        threadId: num(p.threadId),
+        level: num(p.level),
+      };
+    case "ide/debug/return":
+      return {
+        type: "debugReturn",
+        threadId: num(p.threadId),
+        level: num(p.level),
+        stepping: p.stepping === true,
+      };
+    case "ide/debug/condition":
+      return {
+        type: "debugCondition",
+        threadId: num(p.threadId),
+        message: text(p.message),
+      };
     default:
       return undefined;
   }
@@ -179,12 +218,21 @@ export class Ide {
     await slynk?.stop();
   }
 
-  /** Evaluate CODE, a string of Lisp, in PACKAGE if given. */
-  async evaluate(code: string, packageName?: string): Promise<EvalResult> {
+  /**
+   * Evaluate CODE, a string of Lisp, in PACKAGE if given. With DEBUG an
+   * error enters the debugger, and the promise resolves when the
+   * debugger is left; the debugger itself is reported as events.
+   */
+  async evaluate(
+    code: string,
+    packageName?: string,
+    debug = false,
+  ): Promise<EvalResult> {
     await this.connect();
     return this.session.request<EvalResult>("ide/eval", {
       code,
       package: packageName,
+      debug: debug || undefined,
     });
   }
 
@@ -222,6 +270,221 @@ export class Ide {
   /** End REPL. */
   async closeRepl(replId: number): Promise<void> {
     await this.session.request("ide/repl/close", { replId });
+  }
+
+  /** Fetch frames START to END, or to the bottom, of a debugger thread. */
+  async debugBacktrace(
+    threadId: number,
+    start: number,
+    end?: number,
+  ): Promise<Frame[]> {
+    const reply = await this.session.request<{ frames: unknown }>(
+      "ide/debug/backtrace",
+      { threadId, start, end },
+    );
+    return parseFrames(reply.frames);
+  }
+
+  /** Fetch the locals, package and source location of a frame. */
+  async debugFrame(threadId: number, frame: number): Promise<FrameDetails> {
+    return parseFrameDetails(
+      await this.session.request("ide/debug/frame", { threadId, frame }),
+    );
+  }
+
+  /** Invoke restart INDEX of LEVEL; the debugger events say what follows. */
+  async debugRestart(
+    threadId: number,
+    level: number,
+    index: number,
+  ): Promise<void> {
+    await this.session.request("ide/debug/restart", {
+      threadId,
+      level,
+      index,
+    });
+  }
+
+  /** Return to the previous debugger level. */
+  async debugAbort(threadId: number): Promise<void> {
+    await this.session.request("ide/debug/abort", { threadId });
+  }
+
+  /** Abandon the evaluation, whatever the level. */
+  async debugQuit(threadId: number): Promise<void> {
+    await this.session.request("ide/debug/quit", { threadId });
+  }
+
+  /** Use the continue restart. */
+  async debugContinue(threadId: number): Promise<void> {
+    await this.session.request("ide/debug/continue", { threadId });
+  }
+
+  /** Evaluate CODE in a frame; PPRINT asks for pretty-printed values. */
+  async debugEval(
+    threadId: number,
+    frame: number,
+    code: string,
+    packageName?: string,
+    pprint = false,
+  ): Promise<{ ok: boolean; text: string }> {
+    return this.session.request("ide/debug/eval", {
+      threadId,
+      frame,
+      code,
+      package: packageName,
+      pprint,
+    });
+  }
+
+  /** Step into, over (next) or out of a frame. */
+  async debugStep(
+    threadId: number,
+    frame: number,
+    kind: "into" | "next" | "out",
+  ): Promise<void> {
+    await this.session.request("ide/debug/step", { threadId, frame, kind });
+  }
+
+  /** Return the value of CODE from a frame. */
+  async debugReturnFrom(
+    threadId: number,
+    frame: number,
+    code: string,
+  ): Promise<void> {
+    await this.session.request("ide/debug/returnFrom", {
+      threadId,
+      frame,
+      code,
+    });
+  }
+
+  /** Run a frame again from its start. */
+  async debugRestartFrame(threadId: number, frame: number): Promise<void> {
+    await this.session.request("ide/debug/restartFrame", { threadId, frame });
+  }
+
+  /** Toggle *break-on-signals*, and say what it is now. */
+  async breakOnSignals(): Promise<string> {
+    await this.connect();
+    const reply = await this.session.request<{ message: string }>(
+      "ide/debug/breakOnSignals",
+    );
+    return reply.message;
+  }
+
+  /** Inspect the value of CODE, in PACKAGE if given. */
+  async inspectInit(
+    code: string,
+    packageName?: string,
+  ): Promise<Inspected | undefined> {
+    await this.connect();
+    return parseInspected(
+      await this.session.request("ide/inspect/init", {
+        code,
+        package: packageName,
+      }),
+    );
+  }
+
+  /** Inspect the value part INDEX of the object shown. */
+  async inspectPart(index: number): Promise<Inspected | undefined> {
+    return parseInspected(
+      await this.session.request("ide/inspect/part", { index }),
+    );
+  }
+
+  /** Go back to the previous object; undefined when there is none. */
+  async inspectPop(): Promise<Inspected | undefined> {
+    return parseInspected(await this.session.request("ide/inspect/pop"));
+  }
+
+  /** Go forward again after a pop; undefined when there is nothing. */
+  async inspectNext(): Promise<Inspected | undefined> {
+    return parseInspected(await this.session.request("ide/inspect/next"));
+  }
+
+  /** Fetch the object shown again. */
+  async inspectReinspect(): Promise<Inspected | undefined> {
+    return parseInspected(
+      await this.session.request("ide/inspect/reinspect"),
+    );
+  }
+
+  /** Print the object shown with more or less detail. */
+  async inspectToggleVerbose(): Promise<Inspected | undefined> {
+    return parseInspected(
+      await this.session.request("ide/inspect/toggleVerbose"),
+    );
+  }
+
+  /** Fetch parts FROM to TO of the object shown. */
+  async inspectRange(from: number, to: number): Promise<Range> {
+    return parseRange(
+      await this.session.request("ide/inspect/range", { from, to }),
+    );
+  }
+
+  /** Run action part INDEX; undefined when it asks for no refresh. */
+  async inspectAction(index: number): Promise<Inspected | undefined> {
+    return parseInspected(
+      await this.session.request("ide/inspect/action", { index }),
+    );
+  }
+
+  /** Evaluate CODE with * bound to the object shown. */
+  async inspectEval(code: string): Promise<string> {
+    const reply = await this.session.request<{ text: string }>(
+      "ide/inspect/eval",
+      { code },
+    );
+    return reply.text;
+  }
+
+  /** Describe the object shown, or its part INDEX. */
+  async inspectDescribe(index?: number): Promise<string> {
+    const reply = await this.session.request<{ text: string }>(
+      "ide/inspect/describe",
+      { index },
+    );
+    return reply.text;
+  }
+
+  /** Inspect the value of CODE in a frame of a debugger thread. */
+  async inspectFrame(
+    threadId: number,
+    frame: number,
+    code: string,
+  ): Promise<Inspected | undefined> {
+    return parseInspected(
+      await this.session.request("ide/inspect/frame", {
+        threadId,
+        frame,
+        code,
+      }),
+    );
+  }
+
+  /** Inspect local variable VAR, its place in the locals, of a frame. */
+  async inspectFrameVar(
+    threadId: number,
+    frame: number,
+    variable: number,
+  ): Promise<Inspected | undefined> {
+    return parseInspected(
+      await this.session.request("ide/inspect/frameVar", {
+        threadId,
+        frame,
+        var: variable,
+      }),
+    );
+  }
+
+  /** Inspect the condition a debugger thread is handling. */
+  async inspectCondition(threadId: number): Promise<Inspected | undefined> {
+    return parseInspected(
+      await this.session.request("ide/inspect/condition", { threadId }),
+    );
   }
 
   /** Disconnect, then stop slynk and clide. */

@@ -18,6 +18,7 @@
                 #:client-open-p
                 #:client-rex
                 #:client-call
+                #:client-call-status
                 #:client-interrupt
                 #:open-channel
                 #:close-channel
@@ -27,7 +28,21 @@
                 #:broadcast)
   (:export #:register-ide-methods
            #:+not-connected+
-           #:+slynk-failure+)
+           #:+slynk-failure+
+           ;; For the modules that add methods
+           #:ide
+           #:ide-server
+           #:require-client
+           #:register-ide-method
+           #:register-event-handler
+           #:param
+           #:required-string
+           #:optional-string
+           #:required-integer
+           #:optional-integer
+           #:json-value
+           #:json-array
+           #:notify)
   (:documentation "IDE methods: connect to slynk, evaluate, REPLs."))
 
 (in-package :clide/base/ide)
@@ -39,7 +54,10 @@
 ;;;
 ;;;   ide/connect {host?, port}          connect, return implementation info
 ;;;   ide/disconnect                     drop the connection
-;;;   ide/eval {code, package?}          evaluate, return output and value
+;;;   ide/eval {code, package?, debug?}  evaluate, return output and value;
+;;;                                      with debug, an error enters the
+;;;                                      debugger and the call returns when
+;;;                                      the debugger is left
 ;;;   ide/sylvesters                     {text}: slynk's sylvesters.txt, or null
 ;;;   ide/repl/create                    new REPL, return its id
 ;;;   ide/repl/send {replId, text}       give a REPL a line of input
@@ -73,7 +91,8 @@ connection and the REPLs open on it."
   (lock (make-lock "clide-ide"))
   (load-lock (make-lock "clide-ide-load"))
   (client nil)
-  (repls (make-hash-table) :type hash-table))
+  (repls (make-hash-table) :type hash-table)
+  (handlers (make-hash-table) :type hash-table))
 
 (defstruct (repl (:constructor make-repl (server-id thread-id)))
   "A REPL: the slynk channel and thread behind a client side id."
@@ -106,6 +125,12 @@ connection and the REPLs open on it."
     (if (integerp value)
         value
         (raise +invalid-params+ (format nil "~a must be an integer." name)))))
+
+(defun optional-integer (params name)
+  "Return the integer parameter NAME, or NIL when absent or not an
+integer."
+  (let ((value (param params name)))
+    (and (integerp value) value)))
 
 (defun json-value (value)
   "Return VALUE, read from slynk, in a form JSON can carry."
@@ -183,15 +208,24 @@ Nobody can answer a debugger yet, and the thread would wait for ever."
     (when current
       (notify ide "ide/disconnected" "reason" reason))))
 
+(defun register-event-handler (ide kind function)
+  "Have FUNCTION handle the slynk events of KIND, a keyword.  It is
+called in the reader thread with IDE and the event, and must not block."
+  (setf (gethash kind (ide-handlers ide)) function))
+
 (defun handle-event (ide client event)
-  "Handle a slynk message that belongs to no call or channel."
-  (case (first event)
-    (:closed (connection-closed ide client (second event)))
-    (:write-string
-     (when (stringp (second event))
-       (notify ide "ide/output" "text" (second event))))
-    (:debug (abort-debugger client event))
-    (t nil)))
+  "Handle a slynk message that belongs to no call or channel.  A
+debugger event that nobody handles is aborted, since the thread that
+entered the debugger would wait for ever."
+  (let ((handler (gethash (first event) (ide-handlers ide))))
+    (cond (handler (funcall handler ide event))
+          ((eq (first event) :closed)
+           (connection-closed ide client (second event)))
+          ((eq (first event) :write-string)
+           (when (stringp (second event))
+             (notify ide "ide/output" "text" (second event))))
+          ((eq (first event) :debug) (abort-debugger client event))
+          (t nil))))
 
 (defun disconnect (ide)
   "Close the slynk connection of IDE, if any, without a notification."
@@ -245,6 +279,14 @@ area."
                     (list (sym "cl:list") :error
                           (list (sym "cl:princ-to-string") (sym "c")))))))
 
+(defun debug-eval-form (code)
+  "Return the wire form that evaluates the string CODE in slynk with
+the debugger enabled: an error enters it, as in SLY.  The form returns
+(OUTPUT VALUE-TEXT), numbers printed plain."
+  (list (sym "cl:let")
+        (list (list (sym "slynk::*echo-number-alist*") nil))
+        (list (sym "slynk:eval-and-grab-output") code)))
+
 (defun eval-result-object (result)
   "Return the JSON object for RESULT, what EVAL-FORM's form returned."
   (if (and (consp result) (eq (first result) :error))
@@ -259,17 +301,38 @@ area."
 
 (defun evaluate (ide params)
   "Handle ide/eval: evaluate code in slynk and return what it printed
-and the printed value.  A Lisp error is a normal reply with ok false."
+and the printed value.  A Lisp error is a normal reply with ok false.
+With the debug parameter an error enters the debugger instead and the
+call returns when the debugger is left, ok false with slynk's message."
   (let ((code (required-string params "code"))
         (package (optional-string params "package"))
+        (debug (param params "debug"))
         (client (require-client ide)))
     (handler-case
-        (eval-result-object
-         (client-call client (eval-form code)
-                      :package package
-                      :timeout nil))
+        (if (eq debug t)
+            (debug-evaluate client code package)
+            (eval-result-object
+             (client-call client (eval-form code)
+                          :package package
+                          :timeout nil)))
       (slynk-error (condition)
         (raise +slynk-failure+ (princ-to-string condition))))))
+
+(defun debug-evaluate (client code package)
+  "Evaluate CODE on CLIENT with the debugger enabled.  Leaving the
+debugger by an abort ends the evaluation; that is a reply with ok false,
+not a failure, unless the connection itself is gone."
+  (multiple-value-bind (status value)
+      (client-call-status client (debug-eval-form code)
+                          :package package :timeout nil)
+    (case status
+      (:ok (eval-result-object value))
+      (:abort (make-object "ok" nil
+                           "error" (json-value value)
+                           "output" ""
+                           "value" 'null))
+      (t (error 'slynk-error
+                :message (format nil "~a" value))))))
 
 (defun sylvesters-form ()
   "Return the form that reads sylvesters.txt in the slynk image.  The
@@ -441,6 +504,13 @@ its id.  The first prompt arrives as a notification."
 
 
 ;;; Registration
+
+(defun register-ide-method (ide name function)
+  "Register NAME on the server of IDE; FUNCTION takes IDE and the
+params of a request."
+  (register-method (ide-server ide) name
+                   (lambda (params)
+                     (funcall function ide params))))
 
 (defun register-ide-methods (server)
   "Register the ide/ methods on SERVER and return the IDE they share.

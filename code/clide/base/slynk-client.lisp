@@ -28,6 +28,7 @@
   ;; Calls and channels
   (:export #:client-rex
            #:client-call
+           #:client-call-status
            #:open-channel
            #:close-channel
            #:channel-send
@@ -115,11 +116,13 @@ NIL; THREAD is T, :REPL-THREAD or a thread id."
         (error condition)))
     id))
 
-(defun client-call (client form &key package (thread t) (timeout 30))
-  "Evaluate FORM on the server and return its value.
-Signals SLYNK-ERROR when the server aborts the evaluation, the
-connection closes, or TIMEOUT seconds pass without a reply.  A TIMEOUT
-of NIL waits for ever."
+(defun client-call-status (client form &key package (thread t) (timeout 30))
+  "Evaluate FORM on the server and return its status and value.
+The status is :OK with the result, :ABORT with the server's message,
+:INVALID with the server's message, or :CLOSED with the reason.  An
+abort is how a request that left its thread, as a restart does,
+ends.  Signals SLYNK-ERROR when TIMEOUT seconds pass without a reply;
+a TIMEOUT of NIL waits for ever."
   (let ((lock (make-lock "slynk-call"))
         (condition (make-condition-variable))
         (done nil)
@@ -145,6 +148,16 @@ of NIL waits for ever."
                     (when (and left (<= left 0))
                       (fail "no reply from slynk after ~d seconds" timeout))
                     (condition-wait condition lock :timeout left)))))
+    (values status value)))
+
+(defun client-call (client form &key package (thread t) (timeout 30))
+  "Evaluate FORM on the server and return its value.
+Signals SLYNK-ERROR when the server aborts the evaluation, the
+connection closes, or TIMEOUT seconds pass without a reply.  A TIMEOUT
+of NIL waits for ever."
+  (multiple-value-bind (status value)
+      (client-call-status client form :package package :thread thread
+                                      :timeout timeout)
     (ecase status
       (:ok value)
       (:abort (fail "~a" value))

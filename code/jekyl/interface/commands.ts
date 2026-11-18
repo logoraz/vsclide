@@ -7,6 +7,7 @@ import {
   scanForms,
   topLevelFormAt,
 } from "../lib/forms";
+import { DebugPanel } from "./debug-panel";
 import { ReplView } from "./repl";
 import { Results } from "./results";
 import { Status } from "./status";
@@ -17,6 +18,7 @@ export interface CommandContext {
   results: Results;
   status: Status;
   repl: ReplView;
+  panel: DebugPanel;
   output: vscode.OutputChannel;
 }
 
@@ -79,7 +81,7 @@ async function evaluateIn(
     for (const form of forms.length > 0 ? forms : [code]) {
       if (result) context.results.log(last, result);
       last = form;
-      result = await context.ide.evaluate(form, packageName);
+      result = await context.ide.evaluate(form, packageName, true);
       if (!result.ok) break;
     }
     context.status.render();
@@ -109,6 +111,35 @@ async function guarded(
       `VSCLIDE: ${(error as Error).message}`,
     );
   }
+}
+
+/**
+ * Ask for a form and inspect its value. The box offers the selection,
+ * or else the form before the cursor, as the default.
+ */
+async function inspect(context: CommandContext): Promise<void> {
+  const editor = vscode.window.activeTextEditor;
+  let initial = "";
+  let packageName: string | undefined;
+  if (editor?.document.languageId === "commonlisp") {
+    const document = editor.document;
+    const text = document.getText();
+    const offset = document.offsetAt(editor.selection.active);
+    if (!editor.selection.isEmpty) {
+      initial = document.getText(editor.selection);
+    } else {
+      const form = formBefore(text, offset, scanForms(text));
+      if (form) initial = text.slice(form.start, form.end);
+    }
+    packageName = packageAt(text, offset);
+  }
+  const code = await vscode.window.showInputBox({
+    prompt: "Inspect the value of",
+    value: initial,
+    valueSelection: [0, initial.length],
+  });
+  if (code === undefined || code.trim() === "") return;
+  await context.panel.inspectExpression(code, packageName);
 }
 
 /**
@@ -164,6 +195,21 @@ export function registerCommands(
       guarded(context, () => context.repl.closeActive()),
     ),
     register("clearRepl", async () => context.repl.clearActive()),
+    register("showDebugger", async () => context.panel.show("debugger")),
+    register("showInspector", async () => context.panel.show("inspector")),
+    register("inspect", () => guarded(context, () => inspect(context))),
+    register("debugContinue", () =>
+      guarded(context, () => context.panel.continue())),
+    register("debugAbort", () => guarded(context, () => context.panel.abort())),
+    register("debugQuit", () => guarded(context, () => context.panel.quit())),
+    register("debugStepInto", () =>
+      guarded(context, () => context.panel.step("into"))),
+    register("debugStepNext", () =>
+      guarded(context, () => context.panel.step("next"))),
+    register("debugStepOut", () =>
+      guarded(context, () => context.panel.step("out"))),
+    register("toggleBreakOnSignals", () =>
+      guarded(context, () => context.panel.toggleBreakOnSignals())),
     register("showOutput", async () => context.output.show(true)),
   ];
 }

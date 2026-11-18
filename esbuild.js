@@ -16,7 +16,7 @@ const shared = {
 
 /**
  * Return the bundles to build: the extension host script, which keeps
- * vscode external, and the REPL webview script, which runs in the
+ * vscode external, and the webview scripts of the REPL and the debugger panel, which run in the
  * browser context of the panel. With the tests flag, build only the
  * unit tests of code/jekyl/tests, which need no VS Code.
  */
@@ -47,6 +47,13 @@ function bundles() {
       format: "iife",
       platform: "browser",
       outfile: "out/webview/repl.js",
+    },
+    {
+      ...shared,
+      entryPoints: ["code/jekyl/webview/debugger.ts"],
+      format: "iife",
+      platform: "browser",
+      outfile: "out/webview/debugger.js",
     },
   ];
 }

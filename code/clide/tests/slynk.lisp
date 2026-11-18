@@ -26,6 +26,10 @@
                 #:stop-server)
   (:import-from :clide/base/ide
                 #:register-ide-methods)
+  (:import-from :clide/base/debugger
+                #:register-debugger-methods)
+  (:import-from :clide/base/inspector
+                #:register-inspector-methods)
   (:export #:slynk-suite)
   (:documentation "Tests of the slynk client and the ide methods, run
 against a real slynk server in this image."))
@@ -171,6 +175,28 @@ Notifications that arrive first are kept in SESSION."
                     ((eql id (gethash "id" message))
                      (return message))))))
 
+(defun send-request (session method &optional params)
+  "Send METHOD to the clide server without waiting; return the id.
+Use AWAIT-REPLY for the reply."
+  (let ((id (session-next-id session))
+        (request (make-object "jsonrpc" "2.0" "method" method)))
+    (incf (session-next-id session))
+    (setf (gethash "id" request) id)
+    (when params
+      (setf (gethash "params" request) params))
+    (write-message (session-stream session) request)
+    id))
+
+(defun await-reply (session id)
+  "Return the reply to request ID, keeping notifications that come first."
+  (loop :for message := (read-message (session-stream session))
+        :do (cond ((eq message :eof) (error "connection closed"))
+                  ((note-p message)
+                   (setf (session-notes session)
+                         (append (session-notes session) (list message))))
+                  ((eql id (gethash "id" message))
+                   (return message)))))
+
 (defun result (reply)
   "Return the result of REPLY, checking that it is not an error."
   (is (null (gethash "error" reply)) "Unexpected error reply: ~a"
@@ -214,7 +240,9 @@ reading more messages when none is kept.  It is removed from SESSION."
 slynk server, both running here, then stop everything."
   (with-slynk (slynk-port)
     (let ((server (make-server :token "locutus-token")))
-      (register-ide-methods server)
+      (let ((ide (register-ide-methods server)))
+        (register-debugger-methods ide)
+        (register-inspector-methods ide))
       (let* ((socket (socket-connect "127.0.0.1" (start-server server)
                                      :element-type '(unsigned-byte 8)))
              (session (make-session socket (socket-stream socket))))
@@ -392,20 +420,27 @@ with TEXT.  Slynk adds bit counts and radixes after integers."
                       (lambda (params)
                         (search "hello" (gethash "text" params))))))))
 
+(defun quit-debugger (session open)
+  "Quit the debugger described by the ide/debug/open params OPEN."
+  (result (rpc session "ide/debug/quit" (debug-params open))))
+
 (test repl-survives-errors
-  "An error aborts the evaluation, and the REPL still works."
+  "An error opens the debugger; quitting aborts the evaluation and the
+REPL still works."
   (with-ide (session slynk-port)
     (connect-ide session slynk-port)
     (let ((id (create-repl session)))
       (repl-send session id "(error \"boom\")")
-      (let ((note (await-note session "ide/repl/aborted")))
-        (is (search "boom" (gethash "message" (gethash "params" note)))))
+      (let ((open (gethash "params" (await-note session "ide/debug/open"))))
+        (is (search "boom" (gethash "message" (gethash "condition" open))))
+        (quit-debugger session open))
+      (await-note session "ide/repl/aborted")
       (await-prompt session)
       (repl-send session id "(+ 1 1)")
       (is (value-text-p "2" (await-note session "ide/repl/values"))))))
 
 (test repl-interrupt
-  "A running evaluation can be interrupted."
+  "A running evaluation can be interrupted, which opens the debugger."
   (with-ide (session slynk-port)
     (connect-ide session slynk-port)
     (let ((id (create-repl session)))
@@ -413,6 +448,9 @@ with TEXT.  Slynk adds bit counts and radixes after integers."
       (sleep 0.5)
       (result (rpc session "ide/repl/interrupt"
                    (make-object "replId" id)))
+      (quit-debugger session
+                     (gethash "params"
+                              (await-note session "ide/debug/open")))
       (await-note session "ide/repl/aborted")
       (await-prompt session)
       (repl-send session id "(+ 1 1)")
@@ -442,3 +480,290 @@ with TEXT.  Slynk adds bit counts and radixes after integers."
       (repl-send session two "(+ 1 1)")
       (let ((note (await-note session "ide/repl/values")))
         (is (= two (gethash "replId" (gethash "params" note))))))))
+
+
+;;; Debugger tests
+
+(defun start-debugging (session code)
+  "Evaluate CODE with the debugger on, wait for the debugger to open
+and return the request id of the evaluation and the open params."
+  (let* ((id (send-request session "ide/eval"
+                           (make-object "code" code "debug" t)))
+         (note (await-note session "ide/debug/open")))
+    (values id (gethash "params" note))))
+
+(defun debug-params (open &rest pairs)
+  "Return request params for the debugger named by the OPEN params,
+with PAIRS added."
+  (let ((params (make-object "threadId" (gethash "threadId" open))))
+    (loop :for (key value) :on pairs :by #'cddr
+          :do (setf (gethash key params) value))
+    params))
+
+(defun restart-index (open name)
+  "Return the index of the first restart called NAME in OPEN, or NIL."
+  (position name (gethash "restarts" open)
+            :key (lambda (restart) (gethash "name" restart))
+            :test #'string=))
+
+(defun finish-debugging (session id open)
+  "Quit the debugger of OPEN and return the reply to evaluation ID."
+  (result (rpc session "ide/debug/quit" (debug-params open)))
+  (await-note session "ide/debug/return")
+  (await-reply session id))
+
+(test debug-evaluation-without-error
+  "With the debugger on, a good evaluation is still a plain value."
+  (with-ide (session slynk-port)
+    (connect-ide session slynk-port)
+    (let ((value (result (rpc session "ide/eval"
+                              (make-object "code" "(+ 1 2)" "debug" t)))))
+      (is (eq t (gethash "ok" value)))
+      (is (eql 0 (search "3" (gethash "value" value)))))))
+
+(test debug-opens-on-error
+  "An error opens the debugger with its condition, restarts and frames."
+  (with-ide (session slynk-port)
+    (connect-ide session slynk-port)
+    (multiple-value-bind (id open)
+        (start-debugging session "(error \"locutus boom\")")
+      (is (integerp (gethash "threadId" open)))
+      (is (= 1 (gethash "level" open)))
+      (is (search "locutus boom"
+                  (gethash "message" (gethash "condition" open))))
+      (is (search "SIMPLE-ERROR"
+                  (gethash "type" (gethash "condition" open))))
+      (is (restart-index open "ABORT"))
+      (is (plusp (length (gethash "frames" open))))
+      (let ((frame (aref (gethash "frames" open) 0)))
+        (is (= 0 (gethash "index" frame)))
+        (is (stringp (gethash "text" frame))))
+      (let ((reply (finish-debugging session id open)))
+        (is (eq nil (gethash "ok" (result reply))))))))
+
+(test debug-quit-returns-the-evaluation
+  "Quitting ends the evaluation with ok false."
+  (with-ide (session slynk-port)
+    (connect-ide session slynk-port)
+    (multiple-value-bind (id open)
+        (start-debugging session "(error \"locutus quit\")")
+      (let ((value (result (finish-debugging session id open))))
+        (is (eq nil (gethash "ok" value)))
+        (is (stringp (gethash "error" value)))))))
+
+(test debug-restart-by-index
+  "Invoking a restart leaves the debugger."
+  (with-ide (session slynk-port)
+    (connect-ide session slynk-port)
+    (multiple-value-bind (id open)
+        (start-debugging session "(error \"locutus restart\")")
+      (result (rpc session "ide/debug/restart"
+                   (debug-params open
+                                 "level" (gethash "level" open)
+                                 "index" (restart-index open "ABORT"))))
+      (let ((note (await-note session "ide/debug/return")))
+        (is (= (gethash "level" open)
+               (gethash "level" (gethash "params" note)))))
+      (is (eq nil (gethash "ok" (result (await-reply session id))))))))
+
+(test debug-continue
+  "The continue restart resumes the evaluation."
+  (with-ide (session slynk-port)
+    (connect-ide session slynk-port)
+    (multiple-value-bind (id open)
+        (start-debugging session "(progn (cerror \"Go on\" \"locutus\") 42)")
+      (is (restart-index open "CONTINUE"))
+      (result (rpc session "ide/debug/continue" (debug-params open)))
+      (let ((value (result (await-reply session id))))
+        (is (eq t (gethash "ok" value)))
+        (is (eql 0 (search "42" (gethash "value" value))))))))
+
+(test debug-backtrace
+  "More frames can be fetched, in ranges."
+  (with-ide (session slynk-port)
+    (connect-ide session slynk-port)
+    (multiple-value-bind (id open)
+        (start-debugging session "(error \"locutus frames\")")
+      (let ((frames (gethash "frames"
+                             (result (rpc session "ide/debug/backtrace"
+                                          (debug-params open
+                                                        "start" 0
+                                                        "end" 3))))))
+        (is (= 3 (length frames)))
+        (is (= 2 (gethash "index" (aref frames 2)))))
+      (finish-debugging session id open))))
+
+(test debug-frame-details
+  "A frame reports locals, catch tags, its package and a location."
+  (with-ide (session slynk-port)
+    (connect-ide session slynk-port)
+    (multiple-value-bind (id open)
+        (start-debugging session "(error \"locutus details\")")
+      (let ((details (result (rpc session "ide/debug/frame"
+                                  (debug-params open "frame" 0)))))
+        (is (vectorp (gethash "locals" details)))
+        (is (vectorp (gethash "catchTags" details)))
+        (is (stringp (gethash "package" details)))
+        (let ((location (gethash "location" details)))
+          (is (or (eq 'null location) (hash-table-p location)))))
+      (finish-debugging session id open))))
+
+(test debug-eval-in-frame
+  "Code runs in a frame, with plain and pretty-printed results."
+  (with-ide (session slynk-port)
+    (connect-ide session slynk-port)
+    (multiple-value-bind (id open)
+        (start-debugging session "(error \"locutus eval\")")
+      (let ((value (result (rpc session "ide/debug/eval"
+                                (debug-params open "frame" 0
+                                                   "code" "(+ 1 2)")))))
+        (is (eq t (gethash "ok" value)))
+        (is (eql 0 (search "3" (gethash "text" value)))))
+      (let ((value (result (rpc session "ide/debug/eval"
+                                (debug-params open "frame" 0
+                                                   "code" "(list 1 2)"
+                                                   "pprint" t)))))
+        (is (eq t (gethash "ok" value)))
+        (is (search "(1 2)" (gethash "text" value))))
+      (finish-debugging session id open))))
+
+(test debug-step-needs-a-kind
+  "Stepping with an unknown kind is an invalid request."
+  (with-ide (session slynk-port)
+    (connect-ide session slynk-port)
+    (multiple-value-bind (id open)
+        (start-debugging session "(error \"locutus step\")")
+      (is (= -32602 (error-code
+                     (rpc session "ide/debug/step"
+                          (debug-params open "frame" 0 "kind" "sideways")))))
+      (finish-debugging session id open))))
+
+(test debug-break-on-signals
+  "Break on signals toggles, and toggling back restores it."
+  (with-ide (session slynk-port)
+    (connect-ide session slynk-port)
+    (let ((first (gethash "message"
+                          (result (rpc session "ide/debug/breakOnSignals"))))
+          (second (gethash "message"
+                           (result (rpc session
+                                        "ide/debug/breakOnSignals")))))
+      (is (search "*break-on-signals*" first))
+      (is (string/= first second)))))
+
+(test debug-needs-a-connection
+  "Debugger requests before connecting are not-connected errors."
+  (with-ide (session slynk-port)
+    (is (= -32002 (error-code
+                   (rpc session "ide/debug/backtrace"
+                        (make-object "threadId" 1 "start" 0)))))))
+
+
+;;; Inspector tests
+
+(defun inspect-init (session code)
+  "Inspect the value of CODE and return the content object."
+  (result (rpc session "ide/inspect/init" (make-object "code" code))))
+
+(defun part-of-kind (content kind)
+  "Return the first part of CONTENT with KIND, or NIL."
+  (find kind (gethash "parts" content)
+        :key (lambda (part) (gethash "kind" part))
+        :test #'string=))
+
+(test inspect-a-list
+  "A list is inspected into a title and parts, some of them values."
+  (with-ide (session slynk-port)
+    (connect-ide session slynk-port)
+    (let ((content (inspect-init session "(list 1 2 3)")))
+      (is (stringp (gethash "title" content)))
+      (is (integerp (gethash "id" content)))
+      (is (plusp (length (gethash "parts" content))))
+      (is (part-of-kind content "value"))
+      (is (member (gethash "more" content) '(t nil))))))
+
+(test inspect-a-part-and-go-back
+  "A value part can be inspected, and pop and next move in the history."
+  (with-ide (session slynk-port)
+    (connect-ide session slynk-port)
+    (let* ((content (inspect-init session "(list (list 7 8) 2)"))
+           (part (part-of-kind content "value"))
+           (deeper (result (rpc session "ide/inspect/part"
+                                (make-object "index"
+                                             (gethash "index" part))))))
+      (is (hash-table-p deeper))
+      (is (string/= (gethash "title" content) (gethash "title" deeper)))
+      (let ((back (result (rpc session "ide/inspect/pop"))))
+        (is (string= (gethash "title" content) (gethash "title" back))))
+      (let ((forward (result (rpc session "ide/inspect/next"))))
+        (is (string= (gethash "title" deeper)
+                     (gethash "title" forward)))))))
+
+(test inspect-pop-at-the-start
+  "There is nothing before the first object."
+  (with-ide (session slynk-port)
+    (connect-ide session slynk-port)
+    (inspect-init session "(list 1)")
+    (is (eq 'null (result (rpc session "ide/inspect/pop"))))))
+
+(test inspect-eval-and-describe
+  "Code can be evaluated against the object, and the object described."
+  (with-ide (session slynk-port)
+    (connect-ide session slynk-port)
+    (inspect-init session "(list 1 2 3)")
+    (is (eql 0 (search "3" (gethash "text"
+                                    (result (rpc session "ide/inspect/eval"
+                                                 (make-object
+                                                  "code" "(length *)")))))))
+    (is (plusp (length (gethash "text"
+                                (result (rpc session
+                                             "ide/inspect/describe"))))))))
+
+(test inspect-reinspect-and-verbose
+  "Refreshing and toggling verbosity return the object again."
+  (with-ide (session slynk-port)
+    (connect-ide session slynk-port)
+    (let ((content (inspect-init session "(list 1 2 3)")))
+      (is (hash-table-p (result (rpc session "ide/inspect/reinspect"))))
+      (is (hash-table-p (result (rpc session "ide/inspect/toggleVerbose"))))
+      (result (rpc session "ide/inspect/toggleVerbose"))
+      (is (hash-table-p content)))))
+
+(test inspect-range
+  "More parts of a long object can be fetched."
+  (with-ide (session slynk-port)
+    (connect-ide session slynk-port)
+    (inspect-init session "(make-list 600 :initial-element 0)")
+    (let ((more (result (rpc session "ide/inspect/range"
+                             (make-object "from" 0 "to" 50)))))
+      (is (plusp (length (gethash "parts" more))))
+      (is (= 0 (gethash "start" more)))
+      (is (member (gethash "more" more) '(t nil))))))
+
+(test inspect-quit
+  "Quitting forgets the history."
+  (with-ide (session slynk-port)
+    (connect-ide session slynk-port)
+    (inspect-init session "(list 1)")
+    (is (eq 'null (result (rpc session "ide/inspect/quit"))))))
+
+(test inspect-in-a-frame
+  "From the debugger, values in a frame and the condition are inspected."
+  (with-ide (session slynk-port)
+    (connect-ide session slynk-port)
+    (multiple-value-bind (id open)
+        (start-debugging session "(error \"locutus inspect\")")
+      (let ((content (result (rpc session "ide/inspect/frame"
+                                  (debug-params open "frame" 0
+                                                     "code" "(list 4 5)")))))
+        (is (hash-table-p content))
+        (is (part-of-kind content "value")))
+      (is (hash-table-p (result (rpc session "ide/inspect/condition"
+                                     (debug-params open)))))
+      (finish-debugging session id open))))
+
+(test inspect-needs-a-connection
+  "Inspector requests before connecting are not-connected errors."
+  (with-ide (session slynk-port)
+    (is (= -32002 (error-code
+                   (rpc session "ide/inspect/init"
+                        (make-object "code" "1")))))))

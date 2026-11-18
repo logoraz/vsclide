@@ -11,6 +11,7 @@ export class Status implements vscode.Disposable {
     10,
   );
   private readonly subscription: () => void;
+  private inDebugger = false;
 
   /** IDE is the controller whose connection is shown. */
   constructor(private readonly ide: Ide) {
@@ -24,6 +25,17 @@ export class Status implements vscode.Disposable {
     this.item.text = "$(sync~spin) Lisp: starting";
     this.item.tooltip = "Starting the Lisp and connecting to it";
     this.item.show();
+  }
+
+  /** Show whether the Lisp is in the debugger, and set the context key. */
+  setDebugging(debugging: boolean): void {
+    this.inDebugger = debugging;
+    void vscode.commands.executeCommand(
+      "setContext",
+      "vsclide.debugging",
+      debugging,
+    );
+    this.render();
   }
 
   private update(event: IdeEvent): void {
@@ -40,7 +52,11 @@ export class Status implements vscode.Disposable {
       "vsclide.lispRunning",
       info !== undefined,
     );
-    if (info) {
+    if (info && this.inDebugger) {
+      this.item.text = "$(debug) Lisp: debugging";
+      this.item.command = "vsclide.showDebugger";
+      this.item.tooltip = "The Lisp is in the debugger; click to show it";
+    } else if (info) {
       const { name, version } = info.implementation;
       this.item.text = `$(check) ${name ?? "Lisp"} ${version ?? ""}`.trim();
       this.item.command = "vsclide.disconnect";

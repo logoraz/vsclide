@@ -19,8 +19,9 @@
                 :depends-on ("lib")
                 :components ((:file "server")
                              (:file "slynk-client")
-                             (:file "ide"
-                              :depends-on ("server" "slynk-client"))))
+                             (:file "ide" :depends-on ("server" "slynk-client"))
+                             (:file "debugger" :depends-on ("ide"))
+                             (:file "inspector" :depends-on ("ide"))))
                (:module "interface"
                 :pathname "./"
                 :depends-on ("lib" "base")

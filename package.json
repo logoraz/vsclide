@@ -2,7 +2,7 @@
   "name": "vsclide",
   "displayName": ":VSCLIDE",
   "description": "A full-powered Common Lisp IDE for VS Code.",
-  "version": "0.0.3",
+  "version": "0.0.4",
   "publisher": "locutus",
   "license": "MIT",
   "repository": {
@@ -92,6 +92,46 @@
         "command": "vsclide.clearRepl",
         "title": "VSCLIDE: Clear mREPL",
         "icon": "$(clear-all)"
+      },
+      {
+        "command": "vsclide.showDebugger",
+        "title": "VSCLIDE: Show Debugger"
+      },
+      {
+        "command": "vsclide.showInspector",
+        "title": "VSCLIDE: Show Inspector"
+      },
+      {
+        "command": "vsclide.inspect",
+        "title": "VSCLIDE: Inspect Expression"
+      },
+      {
+        "command": "vsclide.debugContinue",
+        "title": "VSCLIDE: Debugger Continue"
+      },
+      {
+        "command": "vsclide.debugAbort",
+        "title": "VSCLIDE: Debugger Abort"
+      },
+      {
+        "command": "vsclide.debugQuit",
+        "title": "VSCLIDE: Debugger Quit"
+      },
+      {
+        "command": "vsclide.debugStepInto",
+        "title": "VSCLIDE: Debugger Step Into"
+      },
+      {
+        "command": "vsclide.debugStepNext",
+        "title": "VSCLIDE: Debugger Step Next"
+      },
+      {
+        "command": "vsclide.debugStepOut",
+        "title": "VSCLIDE: Debugger Step Out"
+      },
+      {
+        "command": "vsclide.toggleBreakOnSignals",
+        "title": "VSCLIDE: Toggle Break on Signals"
       }
     ],
     "configuration": {
@@ -124,6 +164,41 @@
         "command": "vsclide.openRepl",
         "key": "ctrl+alt+l",
         "when": "editorLangId == commonlisp"
+      },
+      {
+        "command": "vsclide.inspect",
+        "key": "ctrl+alt+shift+i",
+        "when": "editorLangId == commonlisp"
+      },
+      {
+        "command": "vsclide.showDebugger",
+        "key": "ctrl+alt+d",
+        "when": "vsclide.debugging"
+      },
+      {
+        "command": "vsclide.debugContinue",
+        "key": "ctrl+alt+shift+c",
+        "when": "vsclide.debugging"
+      },
+      {
+        "command": "vsclide.debugAbort",
+        "key": "ctrl+alt+shift+a",
+        "when": "vsclide.debugging"
+      },
+      {
+        "command": "vsclide.debugStepInto",
+        "key": "ctrl+alt+shift+s",
+        "when": "vsclide.debugging"
+      },
+      {
+        "command": "vsclide.debugStepNext",
+        "key": "ctrl+alt+shift+n",
+        "when": "vsclide.debugging"
+      },
+      {
+        "command": "vsclide.debugStepOut",
+        "key": "ctrl+alt+shift+o",
+        "when": "vsclide.debugging"
       }
     ],
     "menus": {
@@ -137,6 +212,11 @@
           "command": "vsclide.evalSelection",
           "when": "editorLangId == commonlisp && editorHasSelection",
           "group": "vsclide@2"
+        },
+        {
+          "command": "vsclide.inspect",
+          "when": "editorLangId == commonlisp",
+          "group": "vsclide@3"
         }
       ],
       "view/title": [
