@@ -11,6 +11,9 @@
   (:import-from :clide/base/ide
                 #:ide
                 #:require-client
+                #:find-repl
+                #:repl-server-id
+                #:repl-thread-id
                 #:register-ide-method
                 #:required-string
                 #:required-integer
@@ -59,6 +62,8 @@
 ;;;   ide/inspect/frame {threadId, frame, code}
 ;;;   ide/inspect/frameVar {threadId, frame, var}
 ;;;   ide/inspect/condition {threadId}       from the debugger
+;;;   ide/inspect/replValue {replId, entry, value}
+;;;                                          a value in a REPL's history
 
 
 ;;; Content
@@ -218,6 +223,18 @@ refreshed object, or null when the action asks for no refresh."
 
 ;;; Registration
 
+(defun inspect-repl-value (ide params)
+  "Handle ide/inspect/replValue: inspect value VALUE of history entry
+ENTRY of the REPL replId.  Slynk only answers this in the thread of the
+REPL."
+  (let ((repl (find-repl ide params)))
+    (content-object
+     (call ide (list (sym "slynk-mrepl:inspect-entry")
+                     (repl-server-id repl)
+                     (required-integer params "entry")
+                     (required-integer params "value"))
+           :thread (repl-thread-id repl)))))
+
 (defun register-inspector-methods (ide)
   "Register the ide/inspect/ methods on IDE, a value of
 REGISTER-IDE-METHODS."
@@ -235,6 +252,7 @@ REGISTER-IDE-METHODS."
                 ("ide/inspect/quit" ,#'inspect-quit)
                 ("ide/inspect/frame" ,#'inspect-frame)
                 ("ide/inspect/frameVar" ,#'inspect-frame-var)
-                ("ide/inspect/condition" ,#'inspect-condition))
+                ("ide/inspect/condition" ,#'inspect-condition)
+                ("ide/inspect/replValue" ,#'inspect-repl-value))
         :do (register-ide-method ide name function))
   ide)

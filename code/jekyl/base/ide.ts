@@ -63,7 +63,7 @@ export type IdeEvent =
   | {
       type: "replValues";
       replId: number;
-      values: { text: string; index: number }[];
+      values: { text: string; index: number; value: number }[];
     }
   | { type: "replAborted"; replId: number; message: string }
   | { type: "replReadMode"; replId: number; mode: string }
@@ -116,6 +116,7 @@ export function parseNotification(
         values: values.map((value) => ({
           text: text((value as Params).text),
           index: num((value as Params).index),
+          value: num((value as Params).value),
         })),
       };
     }
@@ -484,6 +485,24 @@ export class Ide {
   async inspectCondition(threadId: number): Promise<Inspected | undefined> {
     return parseInspected(
       await this.session.request("ide/inspect/condition", { threadId }),
+    );
+  }
+
+  /**
+   * Inspect value VALUE of history entry ENTRY of REPL, as shown in its
+   * transcript.
+   */
+  async inspectReplValue(
+    replId: number,
+    entry: number,
+    value: number,
+  ): Promise<Inspected | undefined> {
+    return parseInspected(
+      await this.session.request("ide/inspect/replValue", {
+        replId,
+        entry,
+        value,
+      }),
     );
   }
 

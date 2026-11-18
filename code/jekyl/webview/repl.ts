@@ -17,10 +17,17 @@ type Incoming =
   | { type: "select"; replId?: number }
   | { type: "output"; replId: number; text: string; first?: boolean }
   | { type: "prompt"; replId: number; text: string }
-  | { type: "values"; replId: number; values: string[] }
+  | { type: "values"; replId: number; values: ReplValue[] }
   | { type: "aborted"; replId: number; message: string }
   | { type: "notice"; replId?: number; text: string }
   | { type: "clear"; replId?: number };
+
+/** A value a REPL returned: what to show, and where slynk keeps it. */
+interface ReplValue {
+  text: string;
+  entry: number;
+  value: number;
+}
 
 /** Everything the page keeps for one REPL. */
 interface Repl {
@@ -31,6 +38,8 @@ interface Repl {
   entries: string[];
   position: number;
   draft: string;
+  /** True until the first input; output until then is the greeting. */
+  greeting: boolean;
 }
 
 const vscode = acquireVsCodeApi();
@@ -44,11 +53,30 @@ const empty = document.getElementById("empty") as HTMLElement;
 const repls = new Map<number, Repl>();
 let active: number | undefined;
 
+/** Append VALUE, which a click inspects, to the transcript of REPL. */
+function appendValue(repl: Repl, replId: number, value: ReplValue): void {
+  const block = document.createElement("div");
+  block.className = "value inspectable";
+  block.title = "Click to inspect";
+  block.textContent = value.text;
+  block.addEventListener("click", () =>
+    vscode.postMessage({
+      type: "inspect",
+      replId,
+      entry: value.entry,
+      value: value.value,
+    }),
+  );
+  repl.transcript.appendChild(block);
+  repl.transcript.scrollTop = repl.transcript.scrollHeight;
+}
+
 /** Append a block of CLASS to the transcript of REPL and scroll to it. */
 function append(repl: Repl, className: string, text: string): void {
   if (text === "") return;
   const last = repl.transcript.lastElementChild;
-  if (className === "output" && last?.classList.contains("output")) {
+  const joins = className === "output" || className === "banner";
+  if (joins && last?.classList.contains(className)) {
     last.textContent += text;
   } else {
     const block = document.createElement("div");
@@ -112,6 +140,7 @@ function add(id: number, title: string): void {
     entries: [],
     position: 0,
     draft: "",
+    greeting: true,
   });
   select(id);
 }
@@ -132,6 +161,7 @@ function submit(): void {
   const text = input.value;
   if (!repl || active === undefined || text.trim() === "") return;
   append(repl, "input", `${repl.prompt} ${text}`);
+  repl.greeting = false;
   repl.entries.push(text);
   repl.position = repl.entries.length;
   input.value = "";
@@ -195,7 +225,11 @@ window.addEventListener("message", (event: MessageEvent<Incoming>) => {
       break;
     case "output":
       targets(message.replId).forEach((repl) =>
-        append(repl, message.first ? "banner" : "output", message.text),
+        append(
+          repl,
+          message.first || repl.greeting ? "banner" : "output",
+          message.text,
+        ),
       );
       break;
     case "prompt":
@@ -208,7 +242,9 @@ window.addEventListener("message", (event: MessageEvent<Incoming>) => {
       break;
     case "values":
       targets(message.replId).forEach((repl) =>
-        message.values.forEach((value) => append(repl, "value", value)),
+        message.values.forEach((value) =>
+          appendValue(repl, message.replId, value),
+        ),
       );
       break;
     case "aborted":

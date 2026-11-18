@@ -50,9 +50,13 @@ export function activate(context: vscode.ExtensionContext): void {
 
   const status = new Status(ide);
   const results = new Results(output);
-  const repl = new ReplView(context.extensionUri, ide);
   const panel = new DebugPanel(context.extensionUri, ide, (debugging) =>
     status.setDebugging(debugging),
+  );
+  const repl = new ReplView(
+    context.extensionUri,
+    ide,
+    (replId, entry, value) => panel.inspectReplValue(replId, entry, value),
   );
   context.subscriptions.push(
     status,

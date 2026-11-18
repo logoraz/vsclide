@@ -157,3 +157,21 @@ test("notifications become debugger events", () => {
     { type: "debugActivate", threadId: 3, level: 2 },
   );
 });
+
+test("REPL values name their entry and their place in it", () => {
+  const event = parseNotification("ide/repl/values", {
+    replId: 2,
+    values: [
+      { text: "1", index: 4, value: 0 },
+      { text: "2", index: 4, value: 1 },
+    ],
+  });
+  assert.deepEqual(event, {
+    type: "replValues",
+    replId: 2,
+    values: [
+      { text: "1", index: 4, value: 0 },
+      { text: "2", index: 4, value: 1 },
+    ],
+  });
+});

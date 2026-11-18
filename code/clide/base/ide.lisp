@@ -33,6 +33,9 @@
            #:ide
            #:ide-server
            #:require-client
+           #:find-repl
+           #:repl-server-id
+           #:repl-thread-id
            #:register-ide-method
            #:register-event-handler
            #:param
@@ -70,7 +73,7 @@
 ;;;   ide/output {text}                  output with no REPL to take it
 ;;;   ide/repl/output {replId, text}
 ;;;   ide/repl/prompt {replId, package, nickname, level, entry, condition}
-;;;   ide/repl/values {replId, values: [{text, index}]}
+;;;   ide/repl/values {replId, values: [{text, index, value}]}
 ;;;   ide/repl/aborted {replId, message}
 ;;;   ide/repl/readMode {replId, mode}
 ;;;   ide/repl/cleared {replId}
@@ -407,11 +410,15 @@ through its own loader, so both are tried."
 
 (defun repl-values-array (values)
   "Return the JSON array for the :write-values payload VALUES, a list
-of (TEXT ENTRY-INDEX SHORT-TEXT)."
+of (TEXT ENTRY-INDEX SHORT-TEXT).  Each element has the printed text,
+the history entry it belongs to (index), and its place among the values
+of that entry (value), which together name it for ide/inspect/replValue."
   (json-array
    (loop :for entry :in values
+         :for position :from 0
          :collect (make-object "text" (json-value (first entry))
-                               "index" (json-value (second entry))))))
+                               "index" (json-value (second entry))
+                               "value" position))))
 
 (defun handle-repl-message (ide id selector args)
   "Turn the message SELECTOR with ARGS for REPL ID into a notification."

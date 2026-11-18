@@ -11,7 +11,8 @@ type Outgoing =
   | { type: "send"; replId: number; text: string }
   | { type: "interrupt"; replId: number }
   | { type: "select"; replId: number }
-  | { type: "close"; replId: number };
+  | { type: "close"; replId: number }
+  | { type: "inspect"; replId: number; entry: number; value: number };
 
 /**
  * The mREPL panel: a webview view in the bottom panel that holds any
@@ -35,10 +36,18 @@ export class ReplView implements vscode.WebviewViewProvider {
   private readonly announced = new Set<number>();
   private readonly unsubscribe: () => void;
 
-  /** EXTENSION is the root of the extension; the script is under out/. */
+  /**
+   * EXTENSION is the root of the extension; the script is under out/.
+   * INSPECT is called when the user clicks a value of a transcript.
+   */
   constructor(
     private readonly extension: vscode.Uri,
     private readonly ide: Ide,
+    private readonly inspect: (
+      replId: number,
+      entry: number,
+      value: number,
+    ) => Promise<void>,
   ) {
     this.unsubscribe = ide.onEvent((event) => this.onEvent(event));
   }
@@ -91,7 +100,10 @@ export class ReplView implements vscode.WebviewViewProvider {
         preserveFocus: true,
       });
       this.adopting = true;
-      this.banner = banner(await this.sylvesterText());
+      const art = vscode.workspace
+        .getConfiguration("vsclide")
+        .get<boolean>("repl.sylvester", true);
+      this.banner = banner(art ? await this.sylvesterText() : undefined);
       const id = await this.ide.createRepl();
       this.adopt(id);
     } catch (error) {
@@ -156,6 +168,9 @@ export class ReplView implements vscode.WebviewViewProvider {
         case "close":
           await this.close(message.replId);
           break;
+        case "inspect":
+          await this.inspect(message.replId, message.entry, message.value);
+          break;
       }
     } catch (error) {
       this.post({
@@ -179,7 +194,24 @@ export class ReplView implements vscode.WebviewViewProvider {
     this.post({ type: "select", replId: this.active });
   }
 
+  /**
+   * Open a first mREPL, without taking focus, when the Lisp has just
+   * connected and the vsclide.repl.openOnConnect setting is on. Nothing
+   * happens while a REPL is being created, as that is what connects.
+   */
+  private async openOnConnect(): Promise<void> {
+    const enabled = vscode.workspace
+      .getConfiguration("vsclide")
+      .get<boolean>("repl.openOnConnect", false);
+    if (!enabled || this.adopting || this.repls.size > 0) return;
+    await this.create();
+  }
+
   private onEvent(event: IdeEvent): void {
+    if (event.type === "connected") {
+      void this.openOnConnect();
+      return;
+    }
     if (event.type === "disconnected") {
       const text = `Disconnected: ${event.reason}. Close this tab and open ` +
         "a new mREPL.";
@@ -205,7 +237,11 @@ export class ReplView implements vscode.WebviewViewProvider {
         this.post({
           type: "values",
           replId,
-          values: event.values.map((value) => value.text),
+          values: event.values.map((value) => ({
+            text: value.text,
+            entry: value.index,
+            value: value.value,
+          })),
         });
         break;
       case "replAborted":
@@ -254,6 +290,8 @@ export class ReplView implements vscode.WebviewViewProvider {
   .transcript.active { display: block; }
   .input { color: var(--vscode-terminal-ansiGreen); }
   .value { color: var(--vscode-terminal-ansiCyan); }
+  .value.inspectable { cursor: pointer; width: fit-content; }
+  .value.inspectable:hover { text-decoration: underline; }
   .error { color: var(--vscode-errorForeground); }
   .banner { color: #ff69b4; }
   .notice { color: var(--vscode-descriptionForeground); }

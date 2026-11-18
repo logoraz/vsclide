@@ -410,6 +410,23 @@ with TEXT.  Slynk adds bit counts and radixes after integers."
         (is (= 1 (gethash "entry" (gethash "params" note))))
         (is (= 0 (gethash "level" (gethash "params" note))))))))
 
+(test repl-value-can-be-inspected
+  "A REPL value names its place, and can be inspected from there."
+  (with-ide (session slynk-port)
+    (connect-ide session slynk-port)
+    (let ((id (create-repl session)))
+      (repl-send session id "(list 1 2)")
+      (let* ((note (await-note session "ide/repl/values"))
+             (value (aref (gethash "values" (gethash "params" note)) 0))
+             (content (result
+                       (rpc session "ide/inspect/replValue"
+                            (make-object "replId" id
+                                         "entry" (gethash "index" value)
+                                         "value" (gethash "value" value))))))
+        (is (= 0 (gethash "value" value)))
+        (is (search "CONS" (gethash "title" content)))
+        (is (plusp (length (gethash "parts" content))))))))
+
 (test repl-output
   "Output printed by the code arrives as a notification."
   (with-ide (session slynk-port)

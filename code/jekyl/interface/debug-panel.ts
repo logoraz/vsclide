@@ -83,6 +83,21 @@ export class DebugPanel implements vscode.Disposable {
     });
   }
 
+  /** Inspect value VALUE of history entry ENTRY of REPL REPLID. */
+  async inspectReplValue(
+    replId: number,
+    entry: number,
+    value: number,
+  ): Promise<void> {
+    this.show("inspector");
+    await this.run(async () => {
+      this.ui.output = undefined;
+      this.inspector.start(
+        await this.ide.inspectReplValue(replId, entry, value),
+      );
+    });
+  }
+
   /** Use the continue restart of the current level. */
   async continue(): Promise<void> {
     await this.run(() =>

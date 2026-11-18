@@ -228,6 +228,10 @@ vsclide/
   - `view/title` buttons: new, clear, close
 - The panel opens empty, as the terminal does; `VSCLIDE: Open mREPL`
   focuses it and opens a first REPL
+- Setting `vsclide.repl.openOnConnect` (default off) opens a first
+  mREPL, without taking focus, when the Lisp connects
+- Setting `vsclide.repl.sylvester` (default on) turns Sylvester's art
+  off, leaving the words of encouragement
 - A new mREPL starts with a Sylvester banner
   - SLY's art and quips are GPL, so nothing is bundled
   - clide reads `sylvesters.txt` from the user's slynk install
@@ -268,6 +272,9 @@ vsclide/
     to an offset; a snippet wins over a position that has gone stale
   - Context key `vsclide.debugging` and the status bar follow the
     open levels
+- REPL values are clickable: `ide/repl/values` names each value by
+  history entry and place, and `ide/inspect/replValue` inspects it
+  in the REPL's own thread, as slynk requires
 - Deferred: stickers, source line breakpoints
 
 ## Syntax highlighting
