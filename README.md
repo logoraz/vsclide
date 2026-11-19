@@ -69,16 +69,17 @@ first evaluation starts Lisp, or run `VSCLIDE: Connect`.
   [docs/keybindings.md](docs/keybindings.md).
 - Settings, all under `vsclide.`:
 
-  | Setting                | Controls                                       |
-  |------------------------|------------------------------------------------|
-  | `lisp.command`         | the Lisp executable (default `sbcl`)           |
-  | `keymap`               | the key set: `auto`, `vscode` or `emacs`       |
-  | `repl.*`               | opening an mREPL on connect, Sylvester's art   |
-  | `completion.*`         | the completion source, limit and documentation |
-  | `definitions.enabled`  | go to definition                               |
-  | `diagnostics.*`        | compiler notes in the editor                   |
-  | `signatureHelp.*`      | the lambda list popup                          |
-  | `stickers.autoRefresh` | fetching recordings after code runs            |
+  | Setting                | Controls                                          |
+  |------------------------|---------------------------------------------------|
+  | `lisp.command`         | the Lisp executable (default `sbcl`)              |
+  | `keymap`               | the key set: `auto`, `vscode` or `emacs`          |
+  | `repl.*`               | opening on connect, Sylvester's art, package sync |
+  | `completion.*`         | the completion source, limit and documentation    |
+  | `definitions.enabled`  | go to definition                                  |
+  | `references.enabled`   | find all references                               |
+  | `diagnostics.*`        | compiler notes in the editor                      |
+  | `signatureHelp.*`      | the lambda list popup                             |
+  | `stickers.autoRefresh` | fetching recordings after code runs               |
 
 VSCLIDE never changes your settings.
 

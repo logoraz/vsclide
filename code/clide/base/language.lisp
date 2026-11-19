@@ -43,6 +43,11 @@ arglists, documentation and definitions, for the ide methods."))
 ;;;   ide/definitions {name, package?}
 ;;;       {definitions: [{name, location}]}   location as in location.lisp
 ;;;       The image knows the definitions of what is loaded, no more.
+;;;   ide/xref {name, package?}
+;;;       {references: [{name, kind, location}]}
+;;;       Who calls the function, who refers to the variable, and who
+;;;       expands the macro; kind is "calls", "references" or
+;;;       "macroexpands".  What is loaded is all the image knows.
 
 (defparameter *default-limit* 100
   "How many completions ide/complete returns when asked for no number.")
@@ -149,6 +154,36 @@ heading, or NIL when the symbol has no documentation or is unknown."
                 (and (listp found) found)))))))
 
 
+;;; Cross references
+
+(defparameter *xref-kinds* '(:calls :references :macroexpands)
+  "The slynk xref kinds ide/xref reports: callers, references to a
+variable and expansions of a macro.")
+
+(defun xref-object (kind xref)
+  "Return the JSON object for XREF, slynk's (LABEL LOCATION), of KIND."
+  (destructuring-bind (label location) xref
+    (make-object "name" (json-value label)
+                 "kind" (string-downcase (symbol-name kind))
+                 "location" (location-object location))))
+
+(defun references (ide params)
+  "Handle ide/xref: return where a name is called, referred to or
+expanded."
+  (let* ((name (required-string params "name"))
+         (found (ask ide params
+                     (list (sym "slynk:xrefs")
+                           (list (sym "quote") *xref-kinds*)
+                           name))))
+    (make-object
+     "references"
+     (json-array
+      (loop :for (kind . xrefs) :in (and (listp found) found)
+            :when (keywordp kind)
+              :append (mapcar (lambda (xref) (xref-object kind xref))
+                              xrefs))))))
+
+
 ;;; Registration
 
 (defun register-language-methods (ide)
@@ -158,6 +193,7 @@ REGISTER-IDE-METHODS."
           :in `(("ide/complete" ,#'complete)
                 ("ide/arglist" ,#'arglist)
                 ("ide/documentation" ,#'documentation-text)
-                ("ide/definitions" ,#'definitions))
+                ("ide/definitions" ,#'definitions)
+                ("ide/xref" ,#'references))
         :do (register-ide-method ide name function))
   ide)

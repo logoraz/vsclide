@@ -157,8 +157,14 @@ vsclide/
   quips are GPL, so nothing is bundled: clide reads `sylvesters.txt`
   from the user's slynk install (`ide/sylvesters`), and without it only
   the words of encouragement are shown
+- Package sync: evaluating or compiling from the editor sends
+  `ide/repl/syncPackage` for the file's package (`guess-and-set-package`
+  in the REPL's thread, as SLY's `C-c ~`); the new prompt arrives as
+  `ide/repl/prompt`. Skipped when the REPL is busy, already there, or
+  the image lacks the package; `lib/package-sync.ts` decides
 - Settings: `vsclide.repl.openOnConnect` (default off),
-  `vsclide.repl.sylvester` (default on)
+  `vsclide.repl.sylvester` (default on), `vsclide.repl.syncPackage`
+  (default on)
 - Plain TypeScript in the webview; the REPL tab shows through a `when`
   context flag while a process runs
 
@@ -193,23 +199,28 @@ vsclide/
   history entry and place, and `ide/inspect/replValue` inspects it in
   the REPL's own thread, as slynk requires
 
-## Completion, definitions and compiler notes
+## Completion, definitions, references and compiler notes
 
 - clide: `base/language.lisp` registers `ide/complete`, `ide/arglist`,
-  `ide/documentation` and `ide/definitions`; `base/compiler.lisp`
+  `ide/documentation`, `ide/definitions` and `ide/xref`;
+  `base/compiler.lisp`
   registers `ide/compile` and `ide/compileFile`; `base/location.lisp`
   turns slynk source locations into JSON
   - Completion is slynk's flex matching, so `mvb` finds
     `multiple-value-bind`; the package is that of the nearest
     `in-package` above the cursor
   - Definitions are those of what the image has loaded, no more
+  - `ide/xref` asks slynk for who calls, who refers to and who
+    macroexpands a name; Find All References (Shift+F12) shows them,
+    with no panel of our own
   - `ide/compile` sends a string with its file and start offset; slynk
     compiles it as if from that place, so frames find their source and
     notes carry positions; the buffer is named after the file
   - An error while loading compiled code enters the debugger, as with
     `ide/eval`
 - jekyl: `base/language.ts` parses the replies; `interface/completion.ts`,
-  `definition.ts` and `diagnostics.ts` are the VS Code providers
+  `definition.ts`, `references.ts` and `diagnostics.ts` are the VS Code
+  providers
   - Without a connection they say nothing and start no Lisp
   - Completion is asked for again at each key, since matches depend on
     the whole pattern, and is skipped in strings and comments
@@ -225,7 +236,7 @@ vsclide/
     edits above them, dropped by edits on them, replaced on recompile
   - Positions count UTF-16 units in the editor and characters in Lisp
 - Settings: `vsclide.completion.{enabled,mode,limit,documentation}`,
-  `vsclide.definitions.enabled`,
+  `vsclide.definitions.enabled`, `vsclide.references.enabled`,
   `vsclide.diagnostics.{enabled,minimumSeverity}`
 
 ## Signature help, stickers and breakpoints

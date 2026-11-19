@@ -19,6 +19,8 @@ import {
   parseCompileResult,
   parseCompletions,
   parseDefinitions,
+  parseReferences,
+  Reference,
 } from "./language";
 import { LaunchOptions, LispProcess, startSlynk } from "./process";
 import {
@@ -589,6 +591,28 @@ export class Ide {
         package: packageName,
       }),
     );
+  }
+
+  /**
+   * Return where NAME is called, referred to or macroexpanded, in what
+   * the image has loaded. Nothing when not connected.
+   */
+  async xref(name: string, packageName?: string): Promise<Reference[]> {
+    if (!this.info) return [];
+    return parseReferences(
+      await this.session.request("ide/xref", { name, package: packageName }),
+    );
+  }
+
+  /**
+   * Make PACKAGENAME the package of REPL, as SLY's C-c ~ does. The new
+   * prompt arrives as a replPrompt event.
+   */
+  async syncReplPackage(replId: number, packageName: string): Promise<void> {
+    await this.session.request("ide/repl/syncPackage", {
+      replId,
+      package: packageName,
+    });
   }
 
   /**

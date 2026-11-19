@@ -42,7 +42,8 @@
 ;;;       character offset POSITION (from 0) of FILE, or of a buffer
 ;;;       with no file when FILE is absent
 ;;;   ide/compileFile {file, load?}
-;;;       compile FILE, and load it when LOAD is true
+;;;       compile FILE, and load the fasl when LOAD is true and the
+;;;       compiler succeeded; slynk leaves the loading to the client
 ;;;
 ;;; Both reply with
 ;;;
@@ -126,12 +127,39 @@ POSITION, counted from 0, of FILE.  Slynk counts positions from 1."
   "Return the wire form that compiles FILE, and loads it when LOAD."
   (list (sym "slynk:compile-file-for-emacs") file (and load t)))
 
+(defun load-fasl (ide result)
+  "Load the fasl RESULT names, as slynk leaves to the client, and return
+RESULT.  An error while loading enters the debugger, as with ide/eval;
+leaving it by an abort makes RESULT aborted."
+  (let ((client (require-client ide)))
+    (handler-case
+        (multiple-value-bind (status value)
+            (client-call-status client
+                                (list (sym "slynk:load-file")
+                                      (gethash "fasl" result))
+                                :timeout nil)
+          (case status
+            (:ok nil)
+            (:abort (setf (gethash "ok" result) nil
+                          (gethash "aborted" result) t))
+            (t (raise +slynk-failure+ (format nil "~a" value)))))
+      (slynk-error (condition)
+        (raise +slynk-failure+ (princ-to-string condition))))
+    result))
+
 (defun compile-source-file (ide params)
-  "Handle ide/compileFile: compile a file, perhaps loading it."
-  (run-compilation ide
-                   (compile-file-call (required-string params "file")
-                                      (eq (gethash "load" params) t))
-                   nil))
+  "Handle ide/compileFile: compile a file, perhaps loading it.  Slynk
+only compiles; the load is ours, and is skipped when compiling failed."
+  (let ((load (eq (gethash "load" params) t))
+        (result (run-compilation
+                 ide
+                 (compile-file-call (required-string params "file") nil)
+                 nil)))
+    (if (and load
+             (eq t (gethash "ok" result))
+             (stringp (gethash "fasl" result)))
+        (load-fasl ide result)
+        result)))
 
 
 ;;; Registration

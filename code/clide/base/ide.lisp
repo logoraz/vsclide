@@ -67,6 +67,10 @@
 ;;;   ide/repl/send {replId, text}       give a REPL a line of input
 ;;;   ide/repl/interrupt {replId}        interrupt a running REPL evaluation
 ;;;   ide/repl/close {replId}            end a REPL
+;;;   ide/repl/syncPackage {replId, package}
+;;;       set the package of a REPL, as SLY's C-c ~ does; the new prompt
+;;;       arrives as an ide/repl/prompt notification and is returned
+;;;       as {package, nickname}
 ;;;
 ;;; Notifications, sent to every client:
 ;;;
@@ -478,20 +482,25 @@ of that entry (value), which together name it for ide/inspect/replValue."
                                "index" (json-value (second entry))
                                "value" position))))
 
+(defun notify-prompt (ide id args)
+  "Send the ide/repl/prompt notification of REPL ID for ARGS, the
+arguments of a slynk prompt: (PACKAGE NICKNAME LEVEL ENTRY CONDITION)."
+  (destructuring-bind (package nickname level entry &optional condition)
+      args
+    (notify-repl ide id "ide/repl/prompt"
+                 "package" (json-value package)
+                 "nickname" (json-value nickname)
+                 "level" (json-value level)
+                 "entry" (json-value entry)
+                 "condition" (json-value condition))))
+
 (defun handle-repl-message (ide id selector args)
   "Turn the message SELECTOR with ARGS for REPL ID into a notification."
   (case selector
     (:write-string
      (notify-repl ide id "ide/repl/output" "text" (json-value (first args))))
     (:prompt
-     (destructuring-bind (package nickname level entry &optional condition)
-         args
-       (notify-repl ide id "ide/repl/prompt"
-                    "package" (json-value package)
-                    "nickname" (json-value nickname)
-                    "level" (json-value level)
-                    "entry" (json-value entry)
-                    "condition" (json-value condition))))
+     (notify-prompt ide id args))
     (:write-values
      (notify-repl ide id "ide/repl/values"
                   "values" (repl-values-array (first args))))
@@ -568,6 +577,42 @@ its id.  The first prompt arrives as a notification."
     nil))
 
 
+(defun sync-repl-package (ide params)
+  "Handle ide/repl/syncPackage: make PACKAGE the package of the REPL
+replId, in the thread of the REPL, as slynk requires.  The reply names
+the package and its nickname; the page gets the new prompt."
+  (let ((repl (find-repl ide params))
+        (package (required-string params "package"))
+        (id (required-integer params "replId"))
+        (client (require-client ide)))
+    (handler-case
+        (let* ((known (client-call
+                       client
+                       (list (sym "cl:if")
+                             (list (sym "slynk::guess-package") package)
+                             t nil)
+                       :timeout 30))
+               (reply (progn
+                        (unless known
+                          (raise +slynk-failure+
+                                 (format nil "No package ~a." package)))
+                        (client-call
+                         client
+                         (list (sym "slynk-mrepl:eval-for-mrepl")
+                               (repl-server-id repl)
+                               (list (sym "quote")
+                                     (sym "slynk-mrepl:guess-and-set-package"))
+                               package)
+                         :thread (repl-thread-id repl)
+                         :timeout 30)))
+               (prompt (first reply)))
+          (notify-prompt ide id prompt)
+          (make-object "package" (json-value (first prompt))
+                       "nickname" (json-value (second prompt))))
+      (slynk-error (condition)
+        (raise +slynk-failure+ (princ-to-string condition))))))
+
+
 ;;; Registration
 
 (defun register-ide-method (ide name function)
@@ -596,5 +641,6 @@ Call this before the server starts."
       (register "ide/repl/create" #'create-repl)
       (register "ide/repl/send" #'send-to-repl)
       (register "ide/repl/interrupt" #'interrupt-repl)
-      (register "ide/repl/close" #'close-repl))
+      (register "ide/repl/close" #'close-repl)
+      (register "ide/repl/syncPackage" #'sync-repl-package))
     ide))

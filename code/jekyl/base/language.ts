@@ -24,6 +24,15 @@ export interface Definition {
   location: SourceLocation | null;
 }
 
+/** A place that refers to a name, as ide/xref reports it. */
+export interface Reference {
+  /** Who refers, such as "(DEFUN FOO)". */
+  name: string;
+  /** What kind: "calls", "references" or "macroexpands". */
+  kind: string;
+  location: SourceLocation | null;
+}
+
 /** How serious a compiler note is, from most to least. */
 export type NoteSeverity =
   | "error"
@@ -88,6 +97,16 @@ export function parseDefinitions(value: unknown): Definition[] {
   return array(p.definitions).map((definition) => ({
     name: text(definition.name),
     location: parseLocation(definition.location),
+  }));
+}
+
+/** Return the references in VALUE, the reply to ide/xref. */
+export function parseReferences(value: unknown): Reference[] {
+  const p = (value ?? {}) as Params;
+  return array(p.references).map((reference) => ({
+    name: text(reference.name),
+    kind: text(reference.kind),
+    location: parseLocation(reference.location),
   }));
 }
 

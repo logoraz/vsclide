@@ -2,7 +2,7 @@
   "name": "vsclide",
   "displayName": ":VSCLIDE",
   "description": "A full-powered Common Lisp IDE for VS Code.",
-  "version": "0.0.7",
+  "version": "0.0.8",
   "publisher": "locutus",
   "license": "MIT",
   "repository": {
@@ -241,6 +241,16 @@
           "type": "boolean",
           "default": true,
           "description": "Go to definition (F12, Ctrl+click) from what the Lisp has loaded."
+        },
+        "vsclide.references.enabled": {
+          "type": "boolean",
+          "default": true,
+          "description": "Find All References (Shift+F12) from what the Lisp has loaded: callers, references and macroexpansions."
+        },
+        "vsclide.repl.syncPackage": {
+          "type": "boolean",
+          "default": true,
+          "description": "When evaluating or compiling from the editor, switch the active mREPL to the package of the file."
         },
         "vsclide.diagnostics.enabled": {
           "type": "boolean",

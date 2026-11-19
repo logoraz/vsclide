@@ -73,6 +73,7 @@ async function evaluateIn(
   }
   const code = text.slice(span.start, span.end);
   const packageName = packageAt(text, span.start);
+  context.repl.syncPackage(packageName);
   try {
     context.status.connecting();
     // Slynk reads one form per evaluation, so a span holding several,
@@ -165,6 +166,7 @@ async function compileForm(context: CommandContext): Promise<void> {
     document.uri.scheme === "file" ? document.uri.fsPath : undefined;
   context.status.connecting();
   const packageName = packageAt(text, span.start);
+  context.repl.syncPackage(packageName);
   const stickered = await context.stickers.compile(
     document,
     span,

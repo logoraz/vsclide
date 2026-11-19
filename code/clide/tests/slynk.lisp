@@ -264,6 +264,17 @@ slynk server, both running here, then stop everything."
           (ignore-errors (socket-close socket))
           (stop-server server))))))
 
+(defmacro with-quiet-compiler (&body body)
+  "Run BODY with the compiler diagnostics of the slynk server, which
+runs in other threads of this image, thrown away.  Those threads see the
+global value of *ERROR-OUTPUT*, so that is what is replaced."
+  (let ((saved (gensym "SAVED")))
+    `(let ((,saved (sb-ext:symbol-global-value '*error-output*)))
+       (setf (sb-ext:symbol-global-value '*error-output*)
+             (make-broadcast-stream))
+       (unwind-protect (progn ,@body)
+         (setf (sb-ext:symbol-global-value '*error-output*) ,saved)))))
+
 (defmacro with-ide ((session slynk-port) &body body)
   "Run BODY with SESSION on a clide server and SLYNK-PORT the port of a
 slynk server it can connect to."
@@ -493,6 +504,44 @@ REPL still works."
       (is (= -32602 (error-code
                      (rpc session "ide/repl/send"
                           (make-object "replId" id "text" "1"))))))))
+
+(test repl-sync-package
+  "ide/repl/syncPackage changes the package of the REPL and its prompt."
+  (with-ide (session slynk-port)
+    (connect-ide session slynk-port)
+    (eval-ide session "(defpackage :locutus-sync (:use :cl))")
+    (let ((id (create-repl session)))
+      (forget-notes session "ide/repl/prompt")
+      (let ((reply (result (rpc session "ide/repl/syncPackage"
+                                (make-object "replId" id
+                                             "package" "LOCUTUS-SYNC")))))
+        (is (string= "LOCUTUS-SYNC" (gethash "package" reply))))
+      (let ((note (await-prompt session)))
+        (is (string= "LOCUTUS-SYNC"
+                     (gethash "package" (gethash "params" note)))))
+      (repl-send session id "(package-name *package*)")
+      (is (value-text-p "\"LOCUTUS-SYNC\"" (await-note session
+                                                       "ide/repl/values"))))))
+
+(test repl-sync-unknown-package
+  "A package that does not exist is a failure, and the REPL stays usable."
+  (with-ide (session slynk-port)
+    (connect-ide session slynk-port)
+    (let ((id (create-repl session)))
+      (is (= -32003 (error-code
+                     (rpc session "ide/repl/syncPackage"
+                          (make-object "replId" id
+                                       "package" "LOCUTUS-NOWHERE")))))
+      (repl-send session id "(+ 1 1)")
+      (is (value-text-p "2" (await-note session "ide/repl/values"))))))
+
+(test repl-sync-unknown-repl
+  "Syncing a REPL that does not exist is an invalid-params error."
+  (with-ide (session slynk-port)
+    (connect-ide session slynk-port)
+    (is (= -32602 (error-code
+                   (rpc session "ide/repl/syncPackage"
+                        (make-object "replId" 999 "package" "CL-USER")))))))
 
 (test repl-two-at-once
   "Two REPLs keep separate histories."
@@ -902,11 +951,64 @@ with PAIRS added."
                                            (make-object
                                             "name" "locutus-nowhere")))))))))
 
+(test xref-finds-callers
+  "A loaded function has its callers, with a location."
+  (with-ide (session slynk-port)
+    (connect-ide session slynk-port)
+    (compile-ide session "(defun locutus-callee () 1)"
+                 :file "/tmp/locutus-xref.lisp")
+    (compile-ide session "(defun locutus-caller () (locutus-callee))"
+                 :file "/tmp/locutus-xref.lisp")
+    (let* ((result (result (rpc session "ide/xref"
+                                (make-object
+                                 "name" "locutus-callee"
+                                 "package" "COMMON-LISP-USER"))))
+           (references (gethash "references" result)))
+      (is (plusp (length references)))
+      (let ((reference (aref references 0)))
+        (is (string= "calls" (gethash "kind" reference)))
+        (is (search "LOCUTUS-CALLER" (string-upcase
+                                      (gethash "name" reference))))))))
+
+(test xref-in-a-compiled-file
+  "Callers found after compiling and loading a file, in its own package."
+  (with-ide (session slynk-port)
+    (connect-ide session slynk-port)
+    (let ((file (format nil "/tmp/locutus-xref-~d.lisp" (random 1000000))))
+      (with-open-file (out file :direction :output :if-exists :supersede)
+        (write-string "(defpackage :locutus-xf (:use :cl))
+(in-package :locutus-xf)
+(defun callee (x) (* 2 x))
+(defun caller-one (x) (callee x))
+" out))
+      (unwind-protect
+           (progn
+             (result (rpc session "ide/compileFile"
+                          (make-object "file" file "load" t)))
+             (let ((references
+                     (gethash "references"
+                              (result (rpc session "ide/xref"
+                                           (make-object
+                                            "name" "callee"
+                                            "package" "locutus-xf"))))))
+               (is (plusp (length references)))))
+        (ignore-errors (delete-file file))
+        (ignore-errors (delete-file (compile-file-pathname file)))))))
+
+(test xref-of-an-unknown-name
+  "A name that is nowhere has no references."
+  (with-ide (session slynk-port)
+    (connect-ide session slynk-port)
+    (is (= 0 (length (gethash "references"
+                              (result (rpc session "ide/xref"
+                                           (make-object
+                                            "name" "locutus-nowhere")))))))))
+
 (test language-needs-a-connection
   "Language requests before connecting are not-connected errors."
   (with-ide (session slynk-port)
     (dolist (method '("ide/complete" "ide/arglist" "ide/documentation"
-                      "ide/definitions"))
+                      "ide/definitions" "ide/xref"))
       (is (= -32002 (error-code
                      (rpc session method
                           (make-object "prefix" "a" "name" "a"))))))))
@@ -936,20 +1038,21 @@ with PAIRS added."
 
 (test compile-reports-warnings-where-they-are
   "A warning has its severity, message and a position inside the code."
-  (with-ide (session slynk-port)
-    (connect-ide session slynk-port)
-    (let* ((code "(defun locutus-warn () locutus-undefined-variable)")
-           (result (compile-ide session code :position 100
-                                             :file "/tmp/locutus-warn.lisp"))
-           (note (find "warning" (gethash "notes" result)
-                       :key (lambda (note) (gethash "severity" note))
-                       :test #'string=)))
-      (is (not (null note)))
-      (is (search "LOCUTUS-UNDEFINED-VARIABLE"
-                  (string-upcase (gethash "message" note))))
-      (let ((position (gethash "position" (gethash "location" note))))
-        (is (integerp position))
-        (is (<= 101 position (+ 101 (length code))))))))
+  (with-quiet-compiler
+    (with-ide (session slynk-port)
+      (connect-ide session slynk-port)
+      (let* ((code "(defun locutus-warn () locutus-undefined-variable)")
+             (result (compile-ide session code :position 100
+                                               :file "/tmp/locutus-warn.lisp"))
+             (note (find "warning" (gethash "notes" result)
+                         :key (lambda (note) (gethash "severity" note))
+                         :test #'string=)))
+        (is (not (null note)))
+        (is (search "LOCUTUS-UNDEFINED-VARIABLE"
+                    (string-upcase (gethash "message" note))))
+        (let ((position (gethash "position" (gethash "location" note))))
+          (is (integerp position))
+          (is (<= 101 position (+ 101 (length code)))))))))
 
 (test compile-gives-frames-a-source
   "A function compiled from a file position has that file, as its buffer,
@@ -1000,6 +1103,29 @@ and a position in its debugger frame."
                                       (make-object "file" file "load" t)))))
              (is (eq t (gethash "ok" result)))
              (is (stringp (gethash "fasl" result))))
+        (ignore-errors (delete-file file))
+        (ignore-errors (delete-file (compile-file-pathname file)))))))
+
+(test compile-file-loads-when-asked
+  "ide/compileFile loads the fasl only when load is true."
+  (with-ide (session slynk-port)
+    (connect-ide session slynk-port)
+    (let ((file (format nil "/tmp/locutus-load-~d.lisp" (random 1000000))))
+      (with-open-file (out file :direction :output :if-exists :supersede)
+        (write-line "(defun locutus-loaded () 42)" out))
+      (unwind-protect
+           (flet ((loadedp ()
+                    (string= "1" (gethash
+                                  "value"
+                                  (eval-ide
+                                   session
+                                   "(if (fboundp 'locutus-loaded) 1 0)")))))
+             (result (rpc session "ide/compileFile"
+                          (make-object "file" file "load" nil)))
+             (is (not (loadedp)))
+             (result (rpc session "ide/compileFile"
+                          (make-object "file" file "load" t)))
+             (is (loadedp)))
         (ignore-errors (delete-file file))
         (ignore-errors (delete-file (compile-file-pathname file)))))))
 
@@ -1054,17 +1180,18 @@ result object."
 (test stickers-fall-back-to-the-original
   "When the wrapped code does not compile the original is, and the
 stickers are not stuck."
-  (with-ide (session slynk-port)
-    (connect-ide session slynk-port)
-    (let ((reply (compile-stickered
-                  session "(defun locutus-fb () (no-such-package-xyz:f))"
-                  :original "(defun locutus-fb () 7)"
-                  :stickers #(8102))))
-      (is (not (gethash "stuck" reply)))
-      (is (eq t (gethash "ok" (gethash "result" reply)))))
-    (is (search "7" (gethash "value" (eval-ide session "(locutus-fb)"))))
-    (is (null (find 8102 (gethash "stickers" (stickers-ide session "fetch"))
-                    :key (lambda (s) (gethash "id" s)))))))
+  (with-quiet-compiler
+    (with-ide (session slynk-port)
+      (connect-ide session slynk-port)
+      (let ((reply (compile-stickered
+                    session "(defun locutus-fb () (no-such-package-xyz:f))"
+                    :original "(defun locutus-fb () 7)"
+                    :stickers #(8102))))
+        (is (not (gethash "stuck" reply)))
+        (is (eq t (gethash "ok" (gethash "result" reply)))))
+      (is (search "7" (gethash "value" (eval-ide session "(locutus-fb)"))))
+      (is (null (find 8102 (gethash "stickers" (stickers-ide session "fetch"))
+                      :key (lambda (s) (gethash "id" s))))))))
 
 (test stickers-record-exits
   "A form left by an error is recorded as exited."

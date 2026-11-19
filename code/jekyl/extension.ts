@@ -6,6 +6,7 @@ import { registerCommands } from "./interface/commands";
 import { CompletionProvider } from "./interface/completion";
 import { DebugPanel } from "./interface/debug-panel";
 import { DefinitionProvider } from "./interface/definition";
+import { ReferenceProvider } from "./interface/references";
 import { Diagnostics } from "./interface/diagnostics";
 import { Keymap } from "./interface/keymap";
 import { ReplView, VIEW_ID } from "./interface/repl";
@@ -86,6 +87,10 @@ export function activate(context: vscode.ExtensionContext): void {
     vscode.languages.registerDefinitionProvider(
       LISP,
       new DefinitionProvider(ide),
+    ),
+    vscode.languages.registerReferenceProvider(
+      LISP,
+      new ReferenceProvider(ide),
     ),
     vscode.languages.registerSignatureHelpProvider(
       LISP,

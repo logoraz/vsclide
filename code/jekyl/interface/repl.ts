@@ -1,4 +1,5 @@
 import * as vscode from "vscode";
+import { ReplPackage, needsPackageSync } from "../lib/package-sync";
 import { Ide, IdeEvent } from "../base/ide";
 import { banner } from "../lib/sylvester";
 
@@ -25,6 +26,8 @@ export class ReplView implements vscode.WebviewViewProvider {
   /** Titles of the open REPLs by id, in creation order. */
   private readonly repls = new Map<number, string>();
   private active: number | undefined;
+  private readonly packages = new Map<number, ReplPackage>();
+  private readonly busy = new Set<number>();
   private counter = 0;
   private creating: Promise<void> = Promise.resolve();
   private adopting = false;
@@ -84,6 +87,29 @@ export class ReplView implements vscode.WebviewViewProvider {
     return this.creating;
   }
 
+  /**
+   * Make PACKAGENAME, the package of the file being evaluated, the
+   * package of the active REPL, when vsclide.repl.syncPackage is on and
+   * the REPL is elsewhere. It does not wait and does not complain: a
+   * package the image lacks, such as one not yet loaded, leaves the REPL
+   * where it is.
+   */
+  syncPackage(packageName: string | undefined): void {
+    const enabled = vscode.workspace
+      .getConfiguration("vsclide")
+      .get<boolean>("repl.syncPackage", true);
+    const id = this.active;
+    if (!enabled || id === undefined || !this.ide.connected) return;
+    const wanted = packageName;
+    if (
+      !wanted ||
+      !needsPackageSync(this.packages.get(id), wanted, this.busy.has(id))
+    ) {
+      return;
+    }
+    this.ide.syncReplPackage(id, wanted).catch(() => undefined);
+  }
+
   /** Close the active REPL. */
   async closeActive(): Promise<void> {
     if (this.active !== undefined) await this.close(this.active);
@@ -123,6 +149,8 @@ export class ReplView implements vscode.WebviewViewProvider {
 
   private async close(id: number): Promise<void> {
     if (!this.repls.delete(id)) return;
+    this.packages.delete(id);
+    this.busy.delete(id);
     this.announced.delete(id);
     this.post({ type: "remove", replId: id });
     if (this.active === id) this.active = [...this.repls.keys()].pop();
@@ -157,6 +185,7 @@ export class ReplView implements vscode.WebviewViewProvider {
           this.flush();
           break;
         case "send":
+          this.busy.add(message.replId);
           await this.ide.sendToRepl(message.replId, message.text);
           break;
         case "interrupt":
@@ -231,6 +260,11 @@ export class ReplView implements vscode.WebviewViewProvider {
         this.post({ type: "output", replId, text: event.text });
         break;
       case "replPrompt":
+        this.busy.delete(replId);
+        this.packages.set(replId, {
+          name: event.packageName,
+          nickname: event.nickname,
+        });
         this.post({ type: "prompt", replId, text: `${event.nickname}>` });
         break;
       case "replValues":
