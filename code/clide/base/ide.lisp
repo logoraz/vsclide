@@ -45,7 +45,8 @@
            #:optional-integer
            #:json-value
            #:json-array
-           #:notify)
+           #:notify
+           #:ensure-stickers)
   (:documentation "IDE methods: connect to slynk, evaluate, REPLs."))
 
 (in-package :clide/base/ide)
@@ -403,6 +404,63 @@ through its own loader, so both are tried."
       (unless (mrepl-loaded-p client)
         (raise +slynk-failure+
                "Slynk could not load the mrepl contrib.")))))
+
+(defparameter *breakpoint-helper*
+  "(defun clide-image::break-here (id)
+  \"Enter the debugger just before the sticker ID, a breakpoint.\"
+  (let ((sticker (gethash id slynk-stickers::*stickers*)))
+    (when sticker
+      (slynk-stickers::invoke-debugger-for-sticker
+       sticker
+       (make-condition 'slynk-stickers::just-before-sticker
+                       :sticker sticker
+                       :debugger-extra-options
+                       (list (list :clide-breakpoint id)))))))"
+  "The source of the function the image calls at a breakpoint.  It is
+read after the stickers contrib is there, for its symbols.")
+
+(defun stickers-loaded-p (client)
+  "Return true when the stickers contrib and the breakpoint helper are
+in the image of CLIENT."
+  (client-call client
+               (list (sym "cl:and")
+                     (list (sym "cl:find-package") "SLYNK-STICKERS")
+                     (list (sym "cl:find-package") "CLIDE-IMAGE")
+                     (list (sym "cl:fboundp")
+                           (list (sym "cl:find-symbol") "BREAK-HERE"
+                                 "CLIDE-IMAGE"))
+                     t)))
+
+(defun ensure-stickers (ide client)
+  "Load slynk's stickers contrib into the server of CLIENT, with the
+function breakpoints call, unless they are there."
+  (with-lock-held ((ide-load-lock ide))
+    (unless (stickers-loaded-p client)
+      (dolist (module '("slynk/stickers" "slynk-stickers"))
+        (require-module client module)
+        (when (client-call client
+                           (list (sym "cl:and")
+                                 (list (sym "cl:find-package")
+                                       "SLYNK-STICKERS")
+                                 t))
+          (return)))
+      (handler-case
+          (progn
+            (client-call client
+                         (list (sym "cl:or")
+                               (list (sym "cl:find-package") "CLIDE-IMAGE")
+                               (list (sym "cl:make-package") "CLIDE-IMAGE"
+                                     :use (list (sym "quote")
+                                                (list "COMMON-LISP")))))
+            (client-call client
+                         (list (sym "cl:eval")
+                               (list (sym "cl:read-from-string")
+                                     *breakpoint-helper*))))
+        (slynk-error ()
+          (raise +slynk-failure+
+                 "Slynk could not load the stickers contrib."))))
+    (unless (stickers-loaded-p client)
+      (raise +slynk-failure+ "Slynk could not load the stickers contrib."))))
 
 (defun notify-repl (ide id method &rest pairs)
   "Notify clients of METHOD for REPL ID, with extra PAIRS."

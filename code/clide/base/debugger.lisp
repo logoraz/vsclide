@@ -13,6 +13,8 @@
                 #:client-call-status)
   (:import-from :clide/base/location
                 #:location-object)
+  (:import-from :clide/base/stickers
+                #:sticker-extra-object)
   (:import-from :clide/base/ide
                 #:ide
                 #:require-client
@@ -87,9 +89,14 @@
                  "description" (json-value description))))
 
 (defun condition-object (condition)
-  "Return the JSON object for CONDITION, slynk's (MESSAGE TYPE [EXTRA])."
-  (make-object "message" (json-value (first condition))
-               "type" (json-value (second condition))))
+  "Return the JSON object for CONDITION, slynk's (MESSAGE TYPE [EXTRA]).
+It has a sticker when the debugger was entered for one."
+  (let ((object (make-object "message" (json-value (first condition))
+                             "type" (json-value (second condition))))
+        (sticker (sticker-extra-object (third condition))))
+    (when sticker
+      (setf (gethash "sticker" object) sticker))
+    object))
 
 (defun handle-debug (ide event)
   "Turn the :DEBUG EVENT into ide/debug/open."

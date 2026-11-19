@@ -3,12 +3,15 @@ import { Ide } from "./base/ide";
 import { LaunchContext, clideLaunch, slynkLaunch } from "./base/launch";
 import { Session } from "./base/session";
 import { registerCommands } from "./interface/commands";
-import { CompletionProvider, applyTrigger } from "./interface/completion";
+import { CompletionProvider } from "./interface/completion";
 import { DebugPanel } from "./interface/debug-panel";
 import { DefinitionProvider } from "./interface/definition";
 import { Diagnostics } from "./interface/diagnostics";
+import { Keymap } from "./interface/keymap";
 import { ReplView, VIEW_ID } from "./interface/repl";
 import { Results } from "./interface/results";
+import { SignatureProvider } from "./interface/signature";
+import { Stickers } from "./interface/stickers";
 import { Status } from "./interface/status";
 
 let ide: Ide | undefined;
@@ -60,6 +63,7 @@ export function activate(context: vscode.ExtensionContext): void {
     status.setDebugging(debugging),
   );
   const diagnostics = new Diagnostics();
+  const stickers = new Stickers(ide, panel);
   const repl = new ReplView(
     context.extensionUri,
     ide,
@@ -71,6 +75,9 @@ export function activate(context: vscode.ExtensionContext): void {
     repl,
     panel,
     diagnostics,
+    stickers,
+    new Keymap(),
+    vscode.languages.registerHoverProvider(LISP, stickers),
     vscode.languages.registerCompletionItemProvider(
       LISP,
       new CompletionProvider(ide),
@@ -80,11 +87,14 @@ export function activate(context: vscode.ExtensionContext): void {
       LISP,
       new DefinitionProvider(ide),
     ),
-    vscode.workspace.onDidChangeConfiguration((event) => {
-      if (event.affectsConfiguration("vsclide.completion.trigger")) {
-        void applyTrigger();
-      }
-    }),
+    vscode.languages.registerSignatureHelpProvider(
+      LISP,
+      new SignatureProvider(ide),
+      {
+        triggerCharacters: SignatureProvider.triggers,
+        retriggerCharacters: SignatureProvider.retriggers,
+      },
+    ),
     vscode.window.registerWebviewViewProvider(VIEW_ID, repl, {
       webviewOptions: { retainContextWhenHidden: true },
     }),
@@ -103,10 +113,10 @@ export function activate(context: vscode.ExtensionContext): void {
       repl,
       panel,
       diagnostics,
+      stickers,
       output,
     }),
   );
-  void applyTrigger();
 }
 
 /**

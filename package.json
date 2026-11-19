@@ -2,7 +2,7 @@
   "name": "vsclide",
   "displayName": ":VSCLIDE",
   "description": "A full-powered Common Lisp IDE for VS Code.",
-  "version": "0.0.6",
+  "version": "0.0.7",
   "publisher": "locutus",
   "license": "MIT",
   "repository": {
@@ -144,11 +144,58 @@
       {
         "command": "vsclide.toggleBreakOnSignals",
         "title": "VSCLIDE: Toggle Break on Signals"
+      },
+      {
+        "command": "vsclide.sticker",
+        "title": "VSCLIDE: Place or Remove Sticker"
+      },
+      {
+        "command": "vsclide.stickerClearForm",
+        "title": "VSCLIDE: Clear Stickers in Form"
+      },
+      {
+        "command": "vsclide.stickerClearFile",
+        "title": "VSCLIDE: Clear Stickers in File"
+      },
+      {
+        "command": "vsclide.stickerReplay",
+        "title": "VSCLIDE: Replay Sticker Recordings"
+      },
+      {
+        "command": "vsclide.stickerFetch",
+        "title": "VSCLIDE: Fetch Sticker Recordings"
+      },
+      {
+        "command": "vsclide.stickerForget",
+        "title": "VSCLIDE: Forget Sticker Recordings"
+      },
+      {
+        "command": "vsclide.stickerToggleBreak",
+        "title": "VSCLIDE: Toggle Break on Stickers"
+      },
+      {
+        "command": "vsclide.stickerInspect",
+        "title": "VSCLIDE: Inspect Sticker Recording"
       }
     ],
     "configuration": {
       "title": "VSCLIDE",
       "properties": {
+        "vsclide.keymap": {
+          "type": "string",
+          "enum": [
+            "auto",
+            "vscode",
+            "emacs"
+          ],
+          "default": "auto",
+          "enumDescriptions": [
+            "The Emacs set when Awesome Emacs Keymap (tuttieee.emacs-mcx) is installed and enabled, otherwise the VS Code set.",
+            "VS Code style: Alt+Enter, Ctrl+Enter, F5 and F10/F11 in the debugger, and a Ctrl+Alt+C prefix for the rest.",
+            "Emacs and SLY style: C-M-x, C-x C-e, C-c C-c, C-c C-k, C-c C-s and C-c C-d chords, as with Awesome Emacs Keymap."
+          ],
+          "markdownDescription": "The set of key bindings for Common Lisp files and the debugger. Both are always installed; this picks which one is active. `auto` follows Awesome Emacs Keymap."
+        },
         "vsclide.lisp.command": {
           "type": "string",
           "default": "sbcl",
@@ -168,15 +215,6 @@
           "type": "boolean",
           "default": true,
           "description": "Complete symbols in Common Lisp files."
-        },
-        "vsclide.completion.trigger": {
-          "type": "string",
-          "enum": [
-            "automatic",
-            "manual"
-          ],
-          "default": "automatic",
-          "description": "Open completion as you type, or only on request (Ctrl+Alt+I)."
         },
         "vsclide.completion.mode": {
           "type": "string",
@@ -219,79 +257,219 @@
           ],
           "default": "information",
           "description": "Least serious compiler note to show."
+        },
+        "vsclide.signatureHelp.enabled": {
+          "type": "boolean",
+          "default": true,
+          "description": "Show the lambda list of the operator being called, with the current parameter highlighted."
+        },
+        "vsclide.signatureHelp.documentation": {
+          "type": "boolean",
+          "default": true,
+          "description": "Show the docstring of the operator under its lambda list."
+        },
+        "vsclide.stickers.autoRefresh": {
+          "type": "boolean",
+          "default": true,
+          "description": "Fetch what stickers recorded after code runs, so the stickers show it."
         }
       }
     },
     "keybindings": [
       {
         "command": "vsclide.evalTopLevelForm",
-        "key": "ctrl+alt+x",
-        "when": "editorLangId == commonlisp"
+        "key": "alt+enter",
+        "when": "editorTextFocus && editorLangId == commonlisp && vsclide.activeKeymap == 'vscode'"
       },
       {
         "command": "vsclide.evalLastExpression",
-        "key": "ctrl+alt+e",
-        "when": "editorLangId == commonlisp"
+        "key": "ctrl+enter",
+        "when": "editorTextFocus && editorLangId == commonlisp && !editorHasSelection && vsclide.activeKeymap == 'vscode'"
       },
       {
         "command": "vsclide.evalSelection",
-        "key": "ctrl+alt+shift+r",
-        "when": "editorLangId == commonlisp && editorHasSelection"
+        "key": "ctrl+enter",
+        "when": "editorTextFocus && editorLangId == commonlisp && editorHasSelection && vsclide.activeKeymap == 'vscode'"
       },
       {
         "command": "vsclide.compileTopLevelForm",
-        "key": "ctrl+alt+c",
-        "when": "editorLangId == commonlisp"
+        "key": "ctrl+alt+c c",
+        "when": "editorTextFocus && editorLangId == commonlisp && vsclide.activeKeymap == 'vscode'"
       },
       {
         "command": "vsclide.compileFile",
-        "key": "ctrl+alt+k",
-        "when": "editorLangId == commonlisp"
+        "key": "ctrl+alt+c enter",
+        "when": "editorTextFocus && editorLangId == commonlisp && vsclide.activeKeymap == 'vscode'"
+      },
+      {
+        "command": "vsclide.openRepl",
+        "key": "ctrl+alt+c r",
+        "when": "editorTextFocus && editorLangId == commonlisp && vsclide.activeKeymap == 'vscode'"
+      },
+      {
+        "command": "vsclide.inspect",
+        "key": "ctrl+alt+c i",
+        "when": "editorTextFocus && editorLangId == commonlisp && vsclide.activeKeymap == 'vscode'"
+      },
+      {
+        "command": "vsclide.sticker",
+        "key": "ctrl+alt+c s",
+        "when": "editorTextFocus && editorLangId == commonlisp && vsclide.activeKeymap == 'vscode'"
+      },
+      {
+        "command": "vsclide.stickerReplay",
+        "key": "ctrl+alt+c p",
+        "when": "editorTextFocus && editorLangId == commonlisp && vsclide.activeKeymap == 'vscode'"
+      },
+      {
+        "command": "vsclide.stickerToggleBreak",
+        "key": "ctrl+alt+c b",
+        "when": "editorTextFocus && editorLangId == commonlisp && vsclide.activeKeymap == 'vscode'"
+      },
+      {
+        "command": "vsclide.stickerFetch",
+        "key": "ctrl+alt+c f",
+        "when": "editorTextFocus && editorLangId == commonlisp && vsclide.activeKeymap == 'vscode'"
+      },
+      {
+        "command": "vsclide.stickerClearForm",
+        "key": "ctrl+alt+c k",
+        "when": "editorTextFocus && editorLangId == commonlisp && vsclide.activeKeymap == 'vscode'"
+      },
+      {
+        "command": "vsclide.stickerClearFile",
+        "key": "ctrl+alt+c shift+k",
+        "when": "editorTextFocus && editorLangId == commonlisp && vsclide.activeKeymap == 'vscode'"
+      },
+      {
+        "command": "vsclide.showDebugger",
+        "key": "ctrl+alt+c d",
+        "when": "vsclide.debugging && vsclide.activeKeymap == 'vscode'"
+      },
+      {
+        "command": "vsclide.debugContinue",
+        "key": "f5",
+        "when": "vsclide.debugging && !inDebugMode && vsclide.activeKeymap == 'vscode'"
+      },
+      {
+        "command": "vsclide.debugAbort",
+        "key": "shift+f5",
+        "when": "vsclide.debugging && !inDebugMode && vsclide.activeKeymap == 'vscode'"
+      },
+      {
+        "command": "vsclide.debugStepInto",
+        "key": "f11",
+        "when": "vsclide.debugging && !inDebugMode && vsclide.activeKeymap == 'vscode'"
+      },
+      {
+        "command": "vsclide.debugStepNext",
+        "key": "f10",
+        "when": "vsclide.debugging && !inDebugMode && vsclide.activeKeymap == 'vscode'"
+      },
+      {
+        "command": "vsclide.debugStepOut",
+        "key": "shift+f11",
+        "when": "vsclide.debugging && !inDebugMode && vsclide.activeKeymap == 'vscode'"
+      },
+      {
+        "command": "vsclide.evalTopLevelForm",
+        "key": "ctrl+alt+x",
+        "when": "editorTextFocus && editorLangId == commonlisp && vsclide.activeKeymap == 'emacs'"
+      },
+      {
+        "command": "vsclide.evalLastExpression",
+        "key": "ctrl+x ctrl+e",
+        "when": "editorTextFocus && editorLangId == commonlisp && !editorHasSelection && vsclide.activeKeymap == 'emacs'"
+      },
+      {
+        "command": "vsclide.evalSelection",
+        "key": "ctrl+c ctrl+r",
+        "when": "editorTextFocus && editorLangId == commonlisp && editorHasSelection && vsclide.activeKeymap == 'emacs'"
+      },
+      {
+        "command": "vsclide.compileTopLevelForm",
+        "key": "ctrl+c ctrl+c",
+        "when": "editorTextFocus && editorLangId == commonlisp && vsclide.activeKeymap == 'emacs'"
+      },
+      {
+        "command": "vsclide.compileFile",
+        "key": "ctrl+c ctrl+k",
+        "when": "editorTextFocus && editorLangId == commonlisp && vsclide.activeKeymap == 'emacs'"
+      },
+      {
+        "command": "vsclide.openRepl",
+        "key": "ctrl+c ctrl+z",
+        "when": "editorTextFocus && editorLangId == commonlisp && vsclide.activeKeymap == 'emacs'"
+      },
+      {
+        "command": "vsclide.inspect",
+        "key": "ctrl+c shift+i",
+        "when": "editorTextFocus && editorLangId == commonlisp && vsclide.activeKeymap == 'emacs'"
       },
       {
         "command": "editor.action.triggerSuggest",
         "key": "ctrl+alt+i",
-        "when": "editorLangId == commonlisp && editorTextFocus"
+        "when": "editorTextFocus && editorLangId == commonlisp && vsclide.activeKeymap == 'emacs'"
       },
       {
-        "command": "vsclide.openRepl",
-        "key": "ctrl+alt+l",
-        "when": "editorLangId == commonlisp"
+        "command": "vsclide.sticker",
+        "key": "ctrl+c ctrl+s ctrl+s",
+        "when": "editorTextFocus && editorLangId == commonlisp && vsclide.activeKeymap == 'emacs'"
       },
       {
-        "command": "vsclide.inspect",
-        "key": "ctrl+alt+shift+i",
-        "when": "editorLangId == commonlisp"
+        "command": "vsclide.stickerReplay",
+        "key": "ctrl+c ctrl+s ctrl+r",
+        "when": "editorTextFocus && editorLangId == commonlisp && vsclide.activeKeymap == 'emacs'"
+      },
+      {
+        "command": "vsclide.stickerToggleBreak",
+        "key": "ctrl+c ctrl+s ctrl+b",
+        "when": "editorTextFocus && editorLangId == commonlisp && vsclide.activeKeymap == 'emacs'"
+      },
+      {
+        "command": "vsclide.stickerFetch",
+        "key": "ctrl+c ctrl+s ctrl+f",
+        "when": "editorTextFocus && editorLangId == commonlisp && vsclide.activeKeymap == 'emacs'"
+      },
+      {
+        "command": "vsclide.stickerClearForm",
+        "key": "ctrl+c ctrl+s ctrl+k",
+        "when": "editorTextFocus && editorLangId == commonlisp && vsclide.activeKeymap == 'emacs'"
+      },
+      {
+        "command": "vsclide.stickerClearFile",
+        "key": "ctrl+c ctrl+s ctrl+shift+k",
+        "when": "editorTextFocus && editorLangId == commonlisp && vsclide.activeKeymap == 'emacs'"
       },
       {
         "command": "vsclide.showDebugger",
-        "key": "ctrl+alt+d",
-        "when": "vsclide.debugging"
+        "key": "ctrl+c ctrl+d d",
+        "when": "vsclide.debugging && vsclide.activeKeymap == 'emacs'"
       },
       {
         "command": "vsclide.debugContinue",
-        "key": "ctrl+alt+shift+c",
-        "when": "vsclide.debugging"
+        "key": "ctrl+c ctrl+d c",
+        "when": "vsclide.debugging && vsclide.activeKeymap == 'emacs'"
       },
       {
         "command": "vsclide.debugAbort",
-        "key": "ctrl+alt+shift+a",
-        "when": "vsclide.debugging"
+        "key": "ctrl+c ctrl+d a",
+        "when": "vsclide.debugging && vsclide.activeKeymap == 'emacs'"
       },
       {
         "command": "vsclide.debugStepInto",
-        "key": "ctrl+alt+shift+s",
-        "when": "vsclide.debugging"
+        "key": "ctrl+c ctrl+d s",
+        "when": "vsclide.debugging && vsclide.activeKeymap == 'emacs'"
       },
       {
         "command": "vsclide.debugStepNext",
-        "key": "ctrl+alt+shift+n",
-        "when": "vsclide.debugging"
+        "key": "ctrl+c ctrl+d n",
+        "when": "vsclide.debugging && vsclide.activeKeymap == 'emacs'"
       },
       {
         "command": "vsclide.debugStepOut",
-        "key": "ctrl+alt+shift+o",
-        "when": "vsclide.debugging"
+        "key": "ctrl+c ctrl+d o",
+        "when": "vsclide.debugging && vsclide.activeKeymap == 'emacs'"
       }
     ],
     "menus": {
@@ -310,6 +488,11 @@
           "command": "vsclide.inspect",
           "when": "editorLangId == commonlisp",
           "group": "vsclide@3"
+        },
+        {
+          "command": "vsclide.sticker",
+          "when": "editorLangId == commonlisp",
+          "group": "vsclide@4"
         }
       ],
       "view/title": [
@@ -510,7 +693,54 @@
           }
         ]
       }
-    }
+    },
+    "breakpoints": [
+      {
+        "language": "commonlisp"
+      }
+    ],
+    "colors": [
+      {
+        "id": "vsclide.stickerPlaced",
+        "description": "Outline of a sticker not yet armed.",
+        "defaults": {
+          "dark": "#9da5b4",
+          "light": "#6b7280",
+          "highContrast": "#ffffff",
+          "highContrastLight": "#ffffff"
+        }
+      },
+      {
+        "id": "vsclide.stickerArmed",
+        "description": "Background of an armed sticker that has not run.",
+        "defaults": {
+          "dark": "#4f8cff33",
+          "light": "#2563eb26",
+          "highContrast": "#4f8cff66",
+          "highContrastLight": "#4f8cff66"
+        }
+      },
+      {
+        "id": "vsclide.stickerRecorded",
+        "description": "Background of a sticker that has recorded values.",
+        "defaults": {
+          "dark": "#3fb95033",
+          "light": "#16a34a2e",
+          "highContrast": "#3fb95066",
+          "highContrastLight": "#3fb95066"
+        }
+      },
+      {
+        "id": "vsclide.stickerExited",
+        "description": "Background of a sticker whose form exited non-locally.",
+        "defaults": {
+          "dark": "#f8514933",
+          "light": "#dc262633",
+          "highContrast": "#f8514966",
+          "highContrastLight": "#f8514966"
+        }
+      }
+    ]
   },
   "scripts": {
     "check-types": "tsc --noEmit -p ./code/jekyl && tsc --noEmit -p ./code/jekyl/webview",

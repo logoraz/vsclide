@@ -14,6 +14,8 @@
                 #:register-language-methods)
   (:import-from :clide/base/compiler
                 #:register-compiler-methods)
+  (:import-from :clide/base/stickers
+                #:register-sticker-methods)
   (:export #:main)
   (:documentation "Entry point for the clide process."))
 
@@ -24,7 +26,7 @@
 
 (defun register-builtin-methods (server)
   "Register the built-in methods on SERVER: ping, the ide/ methods and
-the debugger, inspector, language and compiler methods."
+the debugger, inspector, language, compiler and sticker methods."
   (register-method server "ping"
                    (lambda (params)
                      (declare (ignore params))
@@ -33,7 +35,8 @@ the debugger, inspector, language and compiler methods."
     (register-debugger-methods ide)
     (register-inspector-methods ide)
     (register-language-methods ide)
-    (register-compiler-methods ide)))
+    (register-compiler-methods ide)
+    (register-sticker-methods ide)))
 
 (defun log-to-stderr (control &rest args)
   "Write a formatted log line to standard error.

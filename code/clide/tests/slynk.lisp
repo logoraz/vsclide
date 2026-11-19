@@ -35,6 +35,8 @@
                 #:documentation-body)
   (:import-from :clide/base/compiler
                 #:register-compiler-methods)
+  (:import-from :clide/base/stickers
+                #:register-sticker-methods)
   (:export #:slynk-suite)
   (:documentation "Tests of the slynk client and the ide methods, run
 against a real slynk server in this image."))
@@ -249,7 +251,8 @@ slynk server, both running here, then stop everything."
         (register-debugger-methods ide)
         (register-inspector-methods ide)
         (register-language-methods ide)
-        (register-compiler-methods ide))
+        (register-compiler-methods ide)
+        (register-sticker-methods ide))
       (let* ((socket (socket-connect "127.0.0.1" (start-server server)
                                      :element-type '(unsigned-byte 8)))
              (session (make-session socket (socket-stream socket))))
@@ -1009,3 +1012,135 @@ and a position in its debugger frame."
     (is (= -32002 (error-code
                    (rpc session "ide/compileFile"
                         (make-object "file" "/tmp/x.lisp")))))))
+
+
+;;; Sticker tests
+
+(defun stickers-ide (session method &rest pairs)
+  "Send the ide/stickers/ METHOD with the object of PAIRS and return the
+result object."
+  (result (rpc session (concatenate 'string "ide/stickers/" method)
+               (apply #'make-object pairs))))
+
+(defun compile-stickered (session code &key original (stickers #(1)))
+  "Send ide/stickers/compile for CODE and return the result object."
+  (let ((params (make-object "code" code "position" 0 "stickers" stickers
+                             "file" "/tmp/locutus-sticker.lisp")))
+    (when original
+      (setf (gethash "original" params) original))
+    (result (rpc session "ide/stickers/compile" params))))
+
+(test stickers-record-what-a-form-returns
+  "A stickered form is recorded each time it runs."
+  (with-ide (session slynk-port)
+    (connect-ide session slynk-port)
+    (let ((reply (compile-stickered
+                  session
+                  "(defun locutus-st (x) (slynk-stickers:record 8101 (* x 2)))"
+                  :stickers #(8101))))
+      (is (eq t (gethash "stuck" reply)))
+      (is (eq t (gethash "ok" (gethash "result" reply)))))
+    (eval-ide session "(locutus-st 4)")
+    (eval-ide session "(locutus-st 5)")
+    (let* ((stickers (gethash "stickers" (stickers-ide session "fetch")))
+           (sticker (find 8101 stickers
+                          :key (lambda (s) (gethash "id" s)))))
+      (is (not (null sticker)))
+      (is (= 2 (gethash "count" sticker)))
+      (let ((recording (gethash "recording" sticker)))
+        (is (eql 0 (search "10" (aref (gethash "values" recording) 0))))
+        (is (not (gethash "exited" recording)))))))
+
+(test stickers-fall-back-to-the-original
+  "When the wrapped code does not compile the original is, and the
+stickers are not stuck."
+  (with-ide (session slynk-port)
+    (connect-ide session slynk-port)
+    (let ((reply (compile-stickered
+                  session "(defun locutus-fb () (no-such-package-xyz:f))"
+                  :original "(defun locutus-fb () 7)"
+                  :stickers #(8102))))
+      (is (not (gethash "stuck" reply)))
+      (is (eq t (gethash "ok" (gethash "result" reply)))))
+    (is (search "7" (gethash "value" (eval-ide session "(locutus-fb)"))))
+    (is (null (find 8102 (gethash "stickers" (stickers-ide session "fetch"))
+                    :key (lambda (s) (gethash "id" s)))))))
+
+(test stickers-record-exits
+  "A form left by an error is recorded as exited."
+  (with-ide (session slynk-port)
+    (connect-ide session slynk-port)
+    (compile-stickered
+     session
+     "(defun locutus-ex () (slynk-stickers:record 8103 (error \"locutus\")))"
+     :stickers #(8103))
+    (multiple-value-bind (id open) (start-debugging session "(locutus-ex)")
+      (finish-debugging session id open))
+    (let* ((reply (stickers-ide session "search" "index" 1 "key" 1
+                                 "sticker" 8103))
+           (sticker (gethash "sticker" reply)))
+      (is (integerp (gethash "total" reply)))
+      (is (= 8103 (gethash "id" sticker)))
+      (is (eq t (gethash "exited" (gethash "recording" sticker)))))))
+
+(test stickers-search-and-forget
+  "The playhead moves over recordings, and forgetting empties them."
+  (with-ide (session slynk-port)
+    (connect-ide session slynk-port)
+    (compile-stickered
+     session "(defun locutus-sr (x) (slynk-stickers:record 8104 x))"
+     :stickers #(8104))
+    (eval-ide session "(locutus-sr 1)")
+    (eval-ide session "(locutus-sr 2)")
+    (let ((reply (stickers-ide session "search" "index" 1 "key" 2
+                               "sticker" 8104)))
+      (is (<= 2 (gethash "total" reply)))
+      (is (= 8104 (gethash "id" (gethash "sticker" reply)))))
+    (is (= 0 (gethash "remaining" (stickers-ide session "forget"))))
+    (is (gethash "error" (stickers-ide session "search" "index" 1 "key" 3)))))
+
+(test stickers-toggle-breaking
+  "Breaking on stickers is switched on, then off."
+  (with-ide (session slynk-port)
+    (connect-ide session slynk-port)
+    (let ((first (gethash "on" (stickers-ide session "toggleBreak")))
+          (second (gethash "on" (stickers-ide session "toggleBreak"))))
+      (is (not (eq first second))))))
+
+(test stickers-breakpoint-enters-the-debugger
+  "A breakpoint stops before its form, and the debugger says which."
+  (with-ide (session slynk-port)
+    (connect-ide session slynk-port)
+    (compile-stickered
+     session
+     (concatenate 'string
+                  "(defun locutus-bp (x) (slynk-stickers:record 8105 "
+                  "(progn (clide-image::break-here 8105) (+ x 1))))")
+     :stickers #(8105))
+    (multiple-value-bind (id open) (start-debugging session "(locutus-bp 1)")
+      (let ((sticker (gethash "sticker" (gethash "condition" open))))
+        (is (hash-table-p sticker))
+        (is (equal "breakpoint" (gethash "kind" sticker)))
+        (is (= 8105 (gethash "id" sticker))))
+      (finish-debugging session id open))))
+
+(test stickers-inspect
+  "A sticker can be inspected."
+  (with-ide (session slynk-port)
+    (connect-ide session slynk-port)
+    (compile-stickered
+     session "(defun locutus-si () (slynk-stickers:record 8106 1))"
+     :stickers #(8106))
+    (eval-ide session "(locutus-si)")
+    (let ((content (stickers-ide session "inspect" "sticker" 8106)))
+      (is (stringp (gethash "title" content))))))
+
+(test stickers-need-a-connection
+  "Sticker requests before connecting are not-connected errors."
+  (with-ide (session slynk-port)
+    (dolist (method '("compile" "kill" "fetch" "search" "forget"
+                      "toggleBreak" "inspect"))
+      (is (= -32002 (error-code
+                     (rpc session (concatenate 'string "ide/stickers/" method)
+                          (make-object "code" "1" "position" 0
+                                       "index" 1 "sticker" 1))))))))

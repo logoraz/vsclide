@@ -50,10 +50,10 @@ class LispItem extends vscode.CompletionItem {
  *   vsclide.completion.documentation  arglist and docstring beside the
  *                                     highlighted item
  *
- * Whether it opens while one types or only on request (Ctrl+Alt+I, the
- * Emacs M-TAB, which the extension binds) is the editor's quick
- * suggestions for the language, which vsclide.completion.trigger sets
- * (see applyTrigger).
+ * Whether it opens while one types or only on request (Ctrl+Space, or
+ * Ctrl+Alt+I, the Emacs M-TAB, in the emacs key map) is the editor's
+ * quick suggestions for the language, the user's to set; the extension
+ * changes no settings of the user's.
  */
 export class CompletionProvider implements vscode.CompletionItemProvider {
   /** The characters that open the list besides typing a name. */
@@ -158,42 +158,5 @@ export class CompletionProvider implements vscode.CompletionItemProvider {
       item.detail = "in this file";
       return item;
     });
-  }
-}
-
-/** The quick suggestions of the editor when completion is by hand. */
-const MANUAL = { other: "off", comments: "off", strings: "off" };
-
-/**
- * Make the editor open completion as one types, or only on request,
- * as vsclide.completion.trigger says. Manual completion sets the
- * quick suggestions of Common Lisp files to off, in the user's
- * settings; going back to automatic removes that, if it is still what
- * was set here, so a setting of the user's own is left alone.
- */
-export async function applyTrigger(): Promise<void> {
-  const trigger = vscode.workspace
-    .getConfiguration("vsclide.completion")
-    .get<string>("trigger", "automatic");
-  const editor = vscode.workspace.getConfiguration("editor", {
-    languageId: "commonlisp",
-  });
-  const own = editor.inspect("quickSuggestions")?.globalLanguageValue;
-  if (trigger === "manual") {
-    if (own === undefined) {
-      await editor.update(
-        "quickSuggestions",
-        MANUAL,
-        vscode.ConfigurationTarget.Global,
-        true,
-      );
-    }
-  } else if (JSON.stringify(own) === JSON.stringify(MANUAL)) {
-    await editor.update(
-      "quickSuggestions",
-      undefined,
-      vscode.ConfigurationTarget.Global,
-      true,
-    );
   }
 }

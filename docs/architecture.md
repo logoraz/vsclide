@@ -307,21 +307,129 @@ vsclide/
     item is highlighted
   - A second backend, `document`, completes from the words of the
     file with no Lisp; the seam for the lighter mode of the editing arm
-  - Automatic or on request only (Ctrl+Alt+I, as Emacs M-TAB) is the
-    editor's quick suggestions for Lisp files;
-    `vsclide.completion.trigger` sets them (VS Code cannot tell typing
-    from a request inside a provider)
+  - Automatic or on request only (Ctrl+Space, or Ctrl+Alt+I as Emacs
+    M-TAB in the emacs key map) is the
+    editor's quick suggestions for Lisp files, the user's to set; VS
+    Code cannot tell typing from a request inside a provider, and the
+    extension writes no settings of the user's. For completion on
+    request only, put this in settings.json:
+    `"[commonlisp]": {"editor.quickSuggestions": {"other": "off",
+    "comments": "off", "strings": "off"}}`
   - Notes become diagnostics (`lib/notes.ts` places them): kept as
     offsets, moved by edits above them, dropped by edits on them,
     replaced when the form or file is compiled again
   - Positions count UTF-16 units in the editor and characters in Lisp;
     they differ after characters beyond the basic plane
-- Settings: `vsclide.completion.{enabled,trigger,mode,limit,
+- Settings: `vsclide.completion.{enabled,mode,limit,
   documentation}`, `vsclide.definitions.enabled`,
   `vsclide.diagnostics.{enabled,minimumSeverity}`
 - Commands: Compile Top-Level Form, Compile and Load File, Clear
   Compiler Notes
-- Deferred: signature help, the lighter eclector backend, xref
+- Deferred: the lighter eclector backend, xref
+
+## Signature help, stickers and breakpoints
+
+- Signature help (`interface/signature.ts`, `lib/signature.ts`) is
+  client-side: the call the cursor is in is found from the text, the
+  lambda list comes from `ide/arglist`, and the parameter of the
+  argument being written is highlighted
+  - Lists that are not calls, such as let bindings, defer to the list
+    around them; quoted data is no call; strings and comments give none
+  - `&optional` and `&rest` follow position; for `&key` the value after
+    `:name` highlights that key
+  - Triggers: space and `(`; `)` refreshes it
+  - Settings: `vsclide.signatureHelp.{enabled,documentation}`
+- clide: `base/stickers.lisp` registers `ide/stickers/` compile, kill,
+  fetch, search, forget, toggleBreak and inspect over slynk's stickers
+  contrib, which `ensure-stickers` (in `base/ide.lisp`) loads on use
+  - Stickers are the editor's marks; the image only knows their numbers
+  - `compile` sends the wrapped text and the original; slynk compiles
+    the wrapped one, and falls back to the original (not stuck) when
+    that fails
+  - A debugger entered for a sticker says so in its condition
+    (`condition.sticker`: before, after or breakpoint)
+- jekyl: `interface/stickers.ts` is SLY's default behaviour
+  - Toggle a sticker on the selection or the sexp at point; clear a
+    form's or a file's; stickers are decorations that move with edits
+    and go when an edit touches them
+  - Compiling a form or loading a file (see Key bindings) wraps
+    each sticker in `slynk-stickers:record ID` and arms it; after a file
+    loads, each form with stickers is compiled again that way
+  - Looks: placed, armed, recorded, exited non-locally (theme colors
+    `vsclide.sticker*`); nesting shows as stacked tints; hover shows
+    the hit count and last values
+  - Recordings are fetched after code runs and when the debugger
+    returns (`vsclide.stickers.autoRefresh`); Fetch and Forget are
+    commands
+  - Replay is a list over the playhead: next, previous, per sticker,
+    jump to start or end, go to sticker, inspect a value, ignore a
+    sticker or the deleted ones
+  - Toggle Break on Stickers is slynk's global switch: the debugger
+    opens before and after every sticker, and the editor shows which
+  - Stickers deleted in the editor are sent to slynk to forget with the
+    next request (SLY's zombies); a new image knows none
+- Breakpoints are the gutter's (`contributes.breakpoints`), as stickers
+  that stop before their form, so they need no debug adapter
+  - On each compile a breakpoint's line is read again: its form is the
+    largest list that starts on the line and is not top-level; the
+    breakpoint's condition, if any, guards the stop
+  - The stop calls `clide-image::break-here`, which clide defines in
+    the image; it is independent of the global break switch
+  - A line where nothing starts, or a form that cannot be wrapped (a
+    let binding), does not stick: the form is compiled as written
+  - Breakpoints arm when compiled, as stickers do; plain evaluation
+    (Evaluate Top-Level Form) does not instrument
+  - Notes of a form compiled with stickers have positions shifted by
+    the wrapping text
+- Settings: `vsclide.keymap`, `vsclide.signatureHelp.{enabled,documentation}`,
+  `vsclide.stickers.autoRefresh`
+- Commands are in the palette; Forget Recordings and Inspect Sticker
+  Recording have no keys; the keys are under Key bindings
+
+## Key bindings
+
+- Two sets are always installed; the `vsclide.activeKeymap` context
+  key picks the active one through the `when` clauses; the extension
+  writes no settings
+  - `vsclide.keymap` is `auto` (default), `vscode` or `emacs`; `auto`
+    selects the Emacs set when Awesome Emacs Keymap is installed and
+    enabled, and follows installs and removals live
+  - VS Code set: modeled on Calva (Alt+Enter, Ctrl+Enter, a Ctrl+Alt+C
+    prefix) and VS Code's own debugger keys
+  - Emacs set: SLY's bindings; every key was checked against the
+    bindings of Awesome Emacs Keymap (`tuttieee.emacs-mcx`) and is
+    free there, except Ctrl+Alt+I, which it binds to the same command
+  - All bindings are for Common Lisp files with the text focused; the
+    debugger ones need `vsclide.debugging`, and in the VS Code set not
+    VS Code's own debug mode
+  - `tests/keybindings.test.ts` checks that every binding is in one
+    set, runs a contributed command, repeats no key, hides no chord,
+    and that the sets bind the same commands
+- Ctrl+Enter takes over Insert Line Below in Lisp files, as Calva
+  does in Clojure ones
+
+| Command | VS Code | Emacs |
+| --- | --- | --- |
+| Evaluate Top-Level Form | Alt+Enter | C-M-x |
+| Evaluate Last Expression | Ctrl+Enter | C-x C-e |
+| Evaluate Selection | Ctrl+Enter, with a selection | C-c C-r |
+| Compile Top-Level Form | Ctrl+Alt+C C | C-c C-c |
+| Compile and Load File | Ctrl+Alt+C Enter | C-c C-k |
+| Open mREPL | Ctrl+Alt+C R | C-c C-z |
+| Inspect Expression | Ctrl+Alt+C I | C-c I |
+| Completion | Ctrl+Space (the editor's) | C-M-i |
+| Place or Remove Sticker | Ctrl+Alt+C S | C-c C-s C-s |
+| Replay Recordings | Ctrl+Alt+C P | C-c C-s C-r |
+| Toggle Break on Stickers | Ctrl+Alt+C B | C-c C-s C-b |
+| Fetch Recordings | Ctrl+Alt+C F | C-c C-s C-f |
+| Clear Stickers in Form | Ctrl+Alt+C K | C-c C-s C-k |
+| Clear Stickers in File | Ctrl+Alt+C Shift+K | C-c C-s C-K |
+| Show Debugger | Ctrl+Alt+C D | C-c C-d d |
+| Debugger Continue | F5 | C-c C-d c |
+| Debugger Abort | Shift+F5 | C-c C-d a |
+| Debugger Step Into | F11 | C-c C-d s |
+| Debugger Step Next | F10 | C-c C-d n |
+| Debugger Step Out | Shift+F11 | C-c C-d o |
 
 ## Syntax highlighting
 

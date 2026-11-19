@@ -20,7 +20,11 @@
                 #:+slynk-failure+)
   (:import-from :clide/base/location
                 #:location-object)
-  (:export #:register-compiler-methods)
+  (:export #:register-compiler-methods
+           ;; For the stickers, which compile too
+           #:result-object
+           #:position-form
+           #:*unsaved-buffer*)
   (:documentation "Compilation in a live image, for the ide methods."))
 
 (in-package :clide/base/compiler)
@@ -95,13 +99,18 @@ object for what it did."
       (slynk-error (condition)
         (raise +slynk-failure+ (princ-to-string condition))))))
 
+(defun position-form (position)
+  "Return the wire form for the offset POSITION, counted from 0, as
+slynk wants it, from 1."
+  (list (sym "quote") (list (list :position (1+ position)))))
+
 (defun compile-string-form (code position file)
   "Return the wire form that compiles CODE, which starts at the offset
 POSITION, counted from 0, of FILE.  Slynk counts positions from 1."
   (list (sym "slynk:compile-string-for-emacs")
         code
         (or file *unsaved-buffer*)
-        (list (sym "quote") (list (list :position (1+ position))))
+        (position-form position)
         file
         nil))
 

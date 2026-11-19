@@ -21,7 +21,8 @@
                 #:json-value
                 #:json-array
                 #:+slynk-failure+)
-  (:export #:register-inspector-methods)
+  (:export #:register-inspector-methods
+           #:content-object)
   (:documentation "The inspector: slynk's, for the ide methods."))
 
 (in-package :clide/base/inspector)

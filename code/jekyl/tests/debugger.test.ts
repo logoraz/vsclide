@@ -175,3 +175,28 @@ test("REPL values name their entry and their place in it", () => {
     ],
   });
 });
+
+/** Return the headline of a level stopped at the sticker stop STOP. */
+function headline(stop: object): string | undefined {
+  return parseLevel({
+    threadId: 1,
+    level: 1,
+    condition: { message: "raw", type: "JUST-BEFORE-STICKER", sticker: stop },
+  }).condition.headline;
+}
+
+test("a breakpoint stop is headlined as a breakpoint", () => {
+  assert.equal(headline({ kind: "breakpoint", id: 2 }), "Breakpoint");
+});
+
+test("a sticker stop names the sticker and what it returned", () => {
+  assert.equal(headline({ kind: "before", id: 3 }), "Stopped before sticker 3");
+  assert.equal(
+    headline({ kind: "after", id: 3, recording: { values: ["8"] } }),
+    "Sticker 3 returned 8",
+  );
+});
+
+test("an ordinary condition has no headline", () => {
+  assert.equal(level(1, 1).condition.headline, undefined);
+});

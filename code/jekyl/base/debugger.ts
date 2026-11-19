@@ -55,11 +55,26 @@ export interface EvalEntry {
   text: string;
 }
 
+/** The sticker a debugger was entered for, when it was. */
+export interface StickerStop {
+  /** before, after (a sticker's form ran) or breakpoint. */
+  kind: "before" | "after" | "breakpoint";
+  id: number;
+  /** The values the form returned, for after. */
+  values: string[];
+}
+
 /** One level of the debugger: a condition in one thread of the Lisp. */
 export interface DebugLevel {
   threadId: number;
   level: number;
-  condition: { message: string; type: string };
+  condition: {
+    message: string;
+    type: string;
+    sticker?: StickerStop;
+    /** What to show in place of the message, for a sticker stop. */
+    headline?: string;
+  };
   restarts: Restart[];
   frames: Frame[];
   /** True while there may be frames beyond those loaded. */
@@ -147,15 +162,49 @@ export function parseFrameDetails(value: unknown): FrameDetails {
   };
 }
 
+/** Return the sticker stop that VALUE describes, or undefined. */
+function parseStop(value: unknown): StickerStop | undefined {
+  const p = (value ?? undefined) as Params | undefined;
+  if (!p || typeof p.id !== "number") return undefined;
+  const kind =
+    p.kind === "after" || p.kind === "breakpoint" ? p.kind : "before";
+  const recording = (p.recording ?? {}) as Params;
+  return {
+    kind,
+    id: p.id,
+    values: Array.isArray(recording.values) ? recording.values.map(text) : [],
+  };
+}
+
+/** Return what to show for a stop at a sticker or breakpoint. */
+export function stopHeadline(stop: StickerStop): string {
+  switch (stop.kind) {
+    case "breakpoint":
+      return "Breakpoint";
+    case "after":
+      return (
+        `Sticker ${stop.id} returned ` + (stop.values.join(", ") || "no values")
+      );
+    default:
+      return `Stopped before sticker ${stop.id}`;
+  }
+}
+
 /** Return the debugger level that the ide/debug/open params describe. */
 export function parseLevel(params: unknown): DebugLevel {
   const p = (params ?? {}) as Params;
   const condition = (p.condition ?? {}) as Params;
   const frames = parseFrames(p.frames);
+  const sticker = parseStop(condition.sticker);
   return {
     threadId: num(p.threadId),
     level: num(p.level),
-    condition: { message: text(condition.message), type: text(condition.type) },
+    condition: {
+      message: text(condition.message),
+      type: text(condition.type),
+      sticker,
+      headline: sticker ? stopHeadline(sticker) : undefined,
+    },
     restarts: array(p.restarts).map((restart) => ({
       name: text(restart.name),
       description: text(restart.description),

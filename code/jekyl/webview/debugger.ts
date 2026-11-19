@@ -84,7 +84,9 @@ function renderLevels(state: PanelState, current: DebugLevel): void {
 
 /** Draw the condition and the toolbar. */
 function renderHeader(level: DebugLevel): void {
-  element("condition-message").textContent = level.condition.message;
+  const message = element("condition-message");
+  message.textContent = level.condition.headline ?? level.condition.message;
+  message.title = level.condition.message;
   element("condition-type").textContent = level.condition.type;
   const frame = level.selected;
   const restartable = level.frames.find((f) => f.index === frame)?.restartable;

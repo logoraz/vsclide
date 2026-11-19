@@ -21,6 +21,15 @@ import {
   parseDefinitions,
 } from "./language";
 import { LaunchOptions, LispProcess, startSlynk } from "./process";
+import {
+  Playhead,
+  Search,
+  StickerCompile,
+  StickerInfo,
+  parsePlayhead,
+  parseStickerCompile,
+  parseStickers,
+} from "./stickers";
 import { Session } from "./session";
 
 /** What slynk reports about itself; null where it reports nothing. */
@@ -610,6 +619,92 @@ export class Ide {
     await this.connect();
     return parseCompileResult(
       await this.session.request("ide/compileFile", { file, load }),
+    );
+  }
+
+  /**
+   * Compile CODE, in which the forms of the stickers NEW are wrapped,
+   * as ide/compile does; ORIGINAL is the code unwrapped, the fallback.
+   * DEAD stickers are forgotten along the way.
+   */
+  async compileStickered(
+    code: string,
+    original: string | undefined,
+    position: number,
+    file: string | undefined,
+    packageName: string | undefined,
+    stickers: number[],
+    dead: number[],
+  ): Promise<StickerCompile> {
+    await this.connect();
+    return parseStickerCompile(
+      await this.session.request("ide/stickers/compile", {
+        code,
+        original,
+        position,
+        file,
+        package: packageName,
+        stickers,
+        dead,
+      }),
+    );
+  }
+
+  /** Forget the stickers IDS. */
+  async killStickers(ids: number[]): Promise<void> {
+    if (!this.info || ids.length === 0) return;
+    await this.session.request("ide/stickers/kill", { ids });
+  }
+
+  /** Describe every sticker the image knows; DEAD are forgotten. */
+  async fetchStickers(dead: number[]): Promise<StickerInfo[]> {
+    await this.connect();
+    return parseStickers(
+      await this.session.request("ide/stickers/fetch", { dead }),
+    );
+  }
+
+  /** Move the playhead by SEARCH; DEAD stickers are forgotten. */
+  async searchRecordings(
+    search: Search,
+    dead: number[],
+  ): Promise<Playhead | { error: string }> {
+    await this.connect();
+    return parsePlayhead(
+      await this.session.request("ide/stickers/search", {
+        ...search,
+        key: 1,
+        dead,
+      }),
+    );
+  }
+
+  /** Forget the recordings, or the first HOWMANY; return what is left. */
+  async forgetRecordings(dead: number[], howMany?: number): Promise<number> {
+    await this.connect();
+    const reply = await this.session.request<{ remaining: number }>(
+      "ide/stickers/forget",
+      { dead, howMany },
+    );
+    return reply.remaining;
+  }
+
+  /** Switch breaking on every sticker; return whether it is on now. */
+  async toggleBreakOnStickers(): Promise<boolean> {
+    await this.connect();
+    const reply = await this.session.request<{ on: boolean }>(
+      "ide/stickers/toggleBreak",
+    );
+    return reply.on === true;
+  }
+
+  /** Inspect the sticker ID, or the recording RECORDING's VALUE. */
+  async inspectSticker(
+    target: { sticker: number } | { recording: number; value?: number },
+  ): Promise<Inspected | undefined> {
+    await this.connect();
+    return parseInspected(
+      await this.session.request("ide/stickers/inspect", target),
     );
   }
 

@@ -13,6 +13,7 @@ import { Diagnostics } from "./diagnostics";
 import { ReplView } from "./repl";
 import { Results } from "./results";
 import { Status } from "./status";
+import { Stickered, Stickers } from "./stickers";
 
 /** What the commands work with. */
 export interface CommandContext {
@@ -22,6 +23,7 @@ export interface CommandContext {
   repl: ReplView;
   panel: DebugPanel;
   diagnostics: Diagnostics;
+  stickers: Stickers;
   output: vscode.OutputChannel;
 }
 
@@ -91,6 +93,7 @@ async function evaluateIn(
     if (result) {
       context.results.show(editor, toRange(document, span), last, result);
     }
+    void context.stickers.refreshQuietly();
   } catch (error) {
     context.status.render();
     context.output.show(true);
@@ -117,8 +120,18 @@ async function guarded(
 }
 
 /** Say what compiling came to: in the log and briefly in the status bar. */
-function report(context: CommandContext, result: CompileResult): void {
-  const line = summarize(result);
+function report(
+  context: CommandContext,
+  result: CompileResult,
+  stickered?: Stickered,
+): void {
+  const line =
+    summarize(result) +
+    (stickered
+      ? stickered.stuck
+        ? ` (${stickered.count} stickers armed)`
+        : " (stickers failed to stick)"
+      : "");
   context.output.appendLine(`;; ${line}`);
   for (const note of result.notes) {
     const first = note.message.split("\n")[0];
@@ -151,15 +164,25 @@ async function compileForm(context: CommandContext): Promise<void> {
   const file =
     document.uri.scheme === "file" ? document.uri.fsPath : undefined;
   context.status.connecting();
-  const result = await context.ide.compile(
-    text.slice(span.start, span.end),
-    span.start,
+  const packageName = packageAt(text, span.start);
+  const stickered = await context.stickers.compile(
+    document,
+    span,
     file,
-    packageAt(text, span.start),
+    packageName,
   );
+  const result =
+    stickered?.result ??
+    (await context.ide.compile(
+      text.slice(span.start, span.end),
+      span.start,
+      file,
+      packageName,
+    ));
   context.status.render();
   context.diagnostics.update(document, span, result);
-  report(context, result);
+  report(context, result, stickered);
+  void context.stickers.refreshQuietly();
 }
 
 /**
@@ -191,6 +214,20 @@ async function compileFile(context: CommandContext): Promise<void> {
     { ...result, notes },
   );
   report(context, result);
+  if (result.ok && !result.aborted) {
+    const done = await context.stickers.compileStickered(
+      document,
+      document.uri.fsPath,
+    );
+    if (done.stuck + done.failed > 0) {
+      void vscode.window.setStatusBarMessage(
+        `VSCLIDE: stickers stuck in ${done.stuck} forms, ` +
+          `${done.failed} failed`,
+        5000,
+      );
+    }
+    void context.stickers.refreshQuietly();
+  }
 }
 
 /**
@@ -276,6 +313,36 @@ export function registerCommands(
       guarded(context, () => compileFile(context)),
     ),
     register("clearNotes", async () => context.diagnostics.clear()),
+    register("sticker", async () => {
+      const editor = lispEditor();
+      if (editor) context.stickers.toggle(editor);
+    }),
+    register("stickerClearForm", async () => {
+      const editor = lispEditor();
+      if (editor) context.stickers.clearForm(editor);
+    }),
+    register("stickerClearFile", async () => {
+      const editor = lispEditor();
+      if (editor) context.stickers.clearDocument(editor);
+    }),
+    register("stickerReplay", () =>
+      guarded(context, () => context.stickers.replay()),
+    ),
+    register("stickerFetch", () =>
+      guarded(context, () => context.stickers.fetch()),
+    ),
+    register("stickerForget", () =>
+      guarded(context, () => context.stickers.forgetRecordings()),
+    ),
+    register("stickerToggleBreak", () =>
+      guarded(context, () => context.stickers.toggleBreak()),
+    ),
+    register("stickerInspect", () =>
+      guarded(context, async () => {
+        const editor = lispEditor();
+        if (editor) await context.stickers.inspectAtCursor(editor);
+      }),
+    ),
     register("openRepl", () => guarded(context, () => context.repl.open())),
     register("newRepl", () => guarded(context, () => context.repl.create())),
     register("closeRepl", () =>

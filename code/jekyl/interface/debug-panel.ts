@@ -6,7 +6,7 @@ import {
   locationFile,
 } from "../base/debugger";
 import { Ide, IdeEvent } from "../base/ide";
-import { InspectorModel } from "../base/inspector";
+import { Inspected, InspectorModel } from "../base/inspector";
 import {
   PanelMessage,
   PanelState,
@@ -96,6 +96,21 @@ export class DebugPanel implements vscode.Disposable {
       this.inspector.start(
         await this.ide.inspectReplValue(replId, entry, value),
       );
+    });
+  }
+
+  /**
+   * Show in the inspector what LOAD inspects, the first part; keep
+   * the focus where it is if PRESERVEFOCUS.
+   */
+  async inspectWith(
+    load: () => Promise<Inspected | undefined>,
+    preserveFocus = false,
+  ): Promise<void> {
+    this.show("inspector", preserveFocus);
+    await this.run(async () => {
+      this.ui.output = undefined;
+      this.inspector.start(await load());
     });
   }
 
