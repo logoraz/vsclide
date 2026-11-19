@@ -30,6 +30,11 @@
                 #:register-debugger-methods)
   (:import-from :clide/base/inspector
                 #:register-inspector-methods)
+  (:import-from :clide/base/language
+                #:register-language-methods
+                #:documentation-body)
+  (:import-from :clide/base/compiler
+                #:register-compiler-methods)
   (:export #:slynk-suite)
   (:documentation "Tests of the slynk client and the ide methods, run
 against a real slynk server in this image."))
@@ -242,7 +247,9 @@ slynk server, both running here, then stop everything."
     (let ((server (make-server :token "locutus-token")))
       (let ((ide (register-ide-methods server)))
         (register-debugger-methods ide)
-        (register-inspector-methods ide))
+        (register-inspector-methods ide)
+        (register-language-methods ide)
+        (register-compiler-methods ide))
       (let* ((socket (socket-connect "127.0.0.1" (start-server server)
                                      :element-type '(unsigned-byte 8)))
              (session (make-session socket (socket-stream socket))))
@@ -784,3 +791,221 @@ with PAIRS added."
     (is (= -32002 (error-code
                    (rpc session "ide/inspect/init"
                         (make-object "code" "1")))))))
+
+
+;;; Language tests
+
+(defun complete-ide (session prefix &optional package)
+  "Send ide/complete for PREFIX and return the items."
+  (let ((params (make-object "prefix" prefix)))
+    (when package
+      (setf (gethash "package" params) package))
+    (gethash "items" (result (rpc session "ide/complete" params)))))
+
+(defun item-labelled (items label)
+  "Return the completion item in ITEMS with LABEL, or NIL."
+  (find label items :test #'string=
+                    :key (lambda (item) (gethash "label" item))))
+
+(test complete-matches-flexibly
+  "Letters spread over a name complete it, with the match chunks."
+  (with-ide (session slynk-port)
+    (connect-ide session slynk-port)
+    (let* ((items (complete-ide session "mvb" "COMMON-LISP-USER"))
+           (item (item-labelled items "multiple-value-bind")))
+      (is (not (null item)))
+      (is (string= "macro" (gethash "kind" item)))
+      (is (numberp (gethash "score" item)))
+      (let ((chunk (aref (gethash "chunks" item) 0)))
+        (is (= 0 (gethash "start" chunk)))
+        (is (stringp (gethash "text" chunk)))))))
+
+(test complete-follows-the-package
+  "A symbol of another package completes when that package is current."
+  (with-ide (session slynk-port)
+    (connect-ide session slynk-port)
+    (eval-ide session "(defpackage :locutus-package (:use :cl))")
+    (eval-ide session "(defun locutus-package::locutus-thing () 1)"
+              "LOCUTUS-PACKAGE")
+    (is (item-labelled (complete-ide session "locutus-th" "LOCUTUS-PACKAGE")
+                       "locutus-thing"))
+    (is (null (item-labelled (complete-ide session "locutus-th"
+                                           "COMMON-LISP-USER")
+                             "locutus-thing")))))
+
+(test complete-nothing-for-an-empty-prefix
+  "No prefix, no items."
+  (with-ide (session slynk-port)
+    (connect-ide session slynk-port)
+    (is (= 0 (length (complete-ide session ""))))))
+
+(test arglist-of-a-function
+  "A function has an arglist; an unknown name has none."
+  (with-ide (session slynk-port)
+    (connect-ide session slynk-port)
+    (eval-ide session "(defun locutus-args (a &optional b) (list a b))")
+    (let ((result (result (rpc session "ide/arglist"
+                               (make-object "name" "locutus-args")))))
+      (is (search "&OPTIONAL" (string-upcase (gethash "arglist" result)))))
+    (is (eq 'null (gethash "arglist"
+                           (result (rpc session "ide/arglist"
+                                        (make-object "name"
+                                                     "locutus-unknown"))))))))
+
+(test documentation-of-a-function
+  "The docstring comes back without slynk's heading."
+  (with-ide (session slynk-port)
+    (connect-ide session slynk-port)
+    (eval-ide session
+              "(defun locutus-docs (a) \"Locutus docstring.\" a)")
+    (let ((text (gethash "text"
+                         (result (rpc session "ide/documentation"
+                                      (make-object "name" "locutus-docs"))))))
+      (is (search "Locutus docstring." text))
+      (is (null (search "Documentation for the symbol" text))))
+    (is (eq 'null (gethash "text"
+                           (result (rpc session "ide/documentation"
+                                        (make-object "name"
+                                                     "locutus-unknown"))))))))
+
+(test documentation-body-cases
+  "Headings are cut; missing documentation is NIL."
+  (is (string= "Function:" (documentation-body
+                            (format nil "Documentation for the symbol X:~2%~
+                                         Function:"))))
+  (is (null (documentation-body
+             (format nil "Documentation for the symbol X:~2%Not documented."))))
+  (is (null (documentation-body "No such symbol, X.")))
+  (is (null (documentation-body nil))))
+
+(test definitions-are-found
+  "A name of a loaded system has a definition with a file."
+  (with-ide (session slynk-port)
+    (connect-ide session slynk-port)
+    (let* ((result (result (rpc session "ide/definitions"
+                                (make-object "name" "slynk:create-server"))))
+           (definitions (gethash "definitions" result)))
+      (is (plusp (length definitions)))
+      (let ((location (gethash "location" (aref definitions 0))))
+        (is (stringp (gethash "file" location)))
+        (is (integerp (gethash "position" location)))))))
+
+(test definitions-of-an-unknown-name
+  "A name that is nowhere has no definitions."
+  (with-ide (session slynk-port)
+    (connect-ide session slynk-port)
+    (is (= 0 (length (gethash "definitions"
+                              (result (rpc session "ide/definitions"
+                                           (make-object
+                                            "name" "locutus-nowhere")))))))))
+
+(test language-needs-a-connection
+  "Language requests before connecting are not-connected errors."
+  (with-ide (session slynk-port)
+    (dolist (method '("ide/complete" "ide/arglist" "ide/documentation"
+                      "ide/definitions"))
+      (is (= -32002 (error-code
+                     (rpc session method
+                          (make-object "prefix" "a" "name" "a"))))))))
+
+
+;;; Compiler tests
+
+(defun compile-ide (session code &key (position 0) file package)
+  "Send ide/compile and return the result object."
+  (let ((params (make-object "code" code "position" position)))
+    (when file
+      (setf (gethash "file" params) file))
+    (when package
+      (setf (gethash "package" params) package))
+    (result (rpc session "ide/compile" params))))
+
+(test compile-good-code
+  "Code that compiles cleanly is ok with no notes, and is loaded."
+  (with-ide (session slynk-port)
+    (connect-ide session slynk-port)
+    (let ((result (compile-ide session "(defun locutus-good (x) x)"
+                               :file "/tmp/locutus-good.lisp")))
+      (is (eq t (gethash "ok" result)))
+      (is (= 0 (length (gethash "notes" result)))))
+    (is (eql 0 (search "7" (gethash "value"
+                                    (eval-ide session "(locutus-good 7)")))))))
+
+(test compile-reports-warnings-where-they-are
+  "A warning has its severity, message and a position inside the code."
+  (with-ide (session slynk-port)
+    (connect-ide session slynk-port)
+    (let* ((code "(defun locutus-warn () locutus-undefined-variable)")
+           (result (compile-ide session code :position 100
+                                             :file "/tmp/locutus-warn.lisp"))
+           (note (find "warning" (gethash "notes" result)
+                       :key (lambda (note) (gethash "severity" note))
+                       :test #'string=)))
+      (is (not (null note)))
+      (is (search "LOCUTUS-UNDEFINED-VARIABLE"
+                  (string-upcase (gethash "message" note))))
+      (let ((position (gethash "position" (gethash "location" note))))
+        (is (integerp position))
+        (is (<= 101 position (+ 101 (length code))))))))
+
+(test compile-gives-frames-a-source
+  "A function compiled from a file position has that file, as its buffer,
+and a position in its debugger frame."
+  (with-ide (session slynk-port)
+    (connect-ide session slynk-port)
+    (compile-ide session "(defun locutus-fail () (error \"locutus\"))"
+                 :position 40 :file "/tmp/locutus-fail.lisp")
+    (multiple-value-bind (id open) (start-debugging session "(locutus-fail)")
+      (let ((location
+              (loop :for frame :from 0 :below 6
+                    :for details := (result
+                                     (rpc session "ide/debug/frame"
+                                          (debug-params open "frame" frame)))
+                    :for location := (gethash "location" details)
+                    :when (and (hash-table-p location)
+                               (equal "/tmp/locutus-fail.lisp"
+                                      (gethash "buffer" location)))
+                      :return location)))
+        (is (not (null location)))
+        (when location
+          (is (integerp (gethash "position" location)))
+          (is (<= 41 (gethash "position" location) 100))))
+      (finish-debugging session id open))))
+
+(test compile-in-a-package
+  "Code is read in the package given."
+  (with-ide (session slynk-port)
+    (connect-ide session slynk-port)
+    (eval-ide session "(defpackage :locutus-compile (:use :cl))")
+    (let ((result (compile-ide session "(defun locutus-in-package () 1)"
+                               :package "LOCUTUS-COMPILE")))
+      (is (eq t (gethash "ok" result))))
+    (is (eql 0 (search "1" (gethash "value"
+                                    (eval-ide
+                                     session "(locutus-in-package)"
+                                     "LOCUTUS-COMPILE")))))))
+
+(test compile-a-file
+  "A file is compiled, and its fasl is named."
+  (with-ide (session slynk-port)
+    (connect-ide session slynk-port)
+    (let ((file (format nil "/tmp/locutus-file-~d.lisp" (random 1000000))))
+      (with-open-file (out file :direction :output :if-exists :supersede)
+        (write-line "(defun locutus-file () 1)" out))
+      (unwind-protect
+           (let ((result (result (rpc session "ide/compileFile"
+                                      (make-object "file" file "load" t)))))
+             (is (eq t (gethash "ok" result)))
+             (is (stringp (gethash "fasl" result))))
+        (ignore-errors (delete-file file))
+        (ignore-errors (delete-file (compile-file-pathname file)))))))
+
+(test compiler-needs-a-connection
+  "Compiling before connecting is a not-connected error."
+  (with-ide (session slynk-port)
+    (is (= -32002 (error-code
+                   (rpc session "ide/compile"
+                        (make-object "code" "1" "position" 0)))))
+    (is (= -32002 (error-code
+                   (rpc session "ide/compileFile"
+                        (make-object "file" "/tmp/x.lisp")))))))

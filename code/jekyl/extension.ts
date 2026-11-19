@@ -3,12 +3,18 @@ import { Ide } from "./base/ide";
 import { LaunchContext, clideLaunch, slynkLaunch } from "./base/launch";
 import { Session } from "./base/session";
 import { registerCommands } from "./interface/commands";
+import { CompletionProvider, applyTrigger } from "./interface/completion";
 import { DebugPanel } from "./interface/debug-panel";
+import { DefinitionProvider } from "./interface/definition";
+import { Diagnostics } from "./interface/diagnostics";
 import { ReplView, VIEW_ID } from "./interface/repl";
 import { Results } from "./interface/results";
 import { Status } from "./interface/status";
 
 let ide: Ide | undefined;
+
+/** What the providers are for: Common Lisp files, saved or not. */
+const LISP: vscode.DocumentSelector = { language: "commonlisp" };
 
 /**
  * Return what launching the Lisp processes depends on. The Lisp
@@ -53,6 +59,7 @@ export function activate(context: vscode.ExtensionContext): void {
   const panel = new DebugPanel(context.extensionUri, ide, (debugging) =>
     status.setDebugging(debugging),
   );
+  const diagnostics = new Diagnostics();
   const repl = new ReplView(
     context.extensionUri,
     ide,
@@ -63,6 +70,21 @@ export function activate(context: vscode.ExtensionContext): void {
     results,
     repl,
     panel,
+    diagnostics,
+    vscode.languages.registerCompletionItemProvider(
+      LISP,
+      new CompletionProvider(ide),
+      ...CompletionProvider.triggerCharacters,
+    ),
+    vscode.languages.registerDefinitionProvider(
+      LISP,
+      new DefinitionProvider(ide),
+    ),
+    vscode.workspace.onDidChangeConfiguration((event) => {
+      if (event.affectsConfiguration("vsclide.completion.trigger")) {
+        void applyTrigger();
+      }
+    }),
     vscode.window.registerWebviewViewProvider(VIEW_ID, repl, {
       webviewOptions: { retainContextWhenHidden: true },
     }),
@@ -74,8 +96,17 @@ export function activate(context: vscode.ExtensionContext): void {
         }
       }),
     ),
-    ...registerCommands({ ide, results, status, repl, panel, output }),
+    ...registerCommands({
+      ide,
+      results,
+      status,
+      repl,
+      panel,
+      diagnostics,
+      output,
+    }),
   );
+  void applyTrigger();
 }
 
 /**

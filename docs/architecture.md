@@ -32,18 +32,20 @@ vsclide/
 │   │   ├── clide.asd         subsystems: clide/tests, clide/docs planned
 │   │   ├── clide.lisp        entry point: main
 │   │   ├── version.sexp
-│   │   ├── base/             server, slynk-client, ide, debugger,
-│   │   │                     inspector
+│   │   ├── base/             server, slynk-client, ide, location,
+│   │   │                     debugger, inspector, language, compiler
 │   │   ├── lib/              ansi-color, jsonrpc, slynk-wire
 │   │   └── tests/
 │   └── jekyl/                TypeScript side (extension host)
 │       ├── tsconfig.json     type-check only (noEmit)
 │       ├── extension.ts      activation and wiring
 │       ├── base/             process, session, launch, ide, debugger,
-│       │                     inspector, panel
-│       ├── lib/              jsonrpc, forms, source-location
+│       │                     inspector, panel, language
+│       ├── lib/              jsonrpc, forms, source-location,
+│       │                     completion, notes
 │       ├── interface/        commands, results, status, repl,
-│       │                     debug-panel
+│       │                     debug-panel, completion, definition,
+│       │                     diagnostics
 │       ├── webview/          REPL and debugger page scripts (own
 │       │                     tsconfig, DOM)
 │       └── tests/
@@ -276,6 +278,50 @@ vsclide/
   history entry and place, and `ide/inspect/replValue` inspects it
   in the REPL's own thread, as slynk requires
 - Deferred: stickers, source line breakpoints
+
+## Completion, definitions and compiler notes
+
+- clide: `base/language.lisp` registers `ide/complete`, `ide/arglist`,
+  `ide/documentation` and `ide/definitions`; `base/compiler.lisp`
+  registers `ide/compile` and `ide/compileFile`; `base/location.lisp`
+  turns slynk source locations into JSON for these and the debugger
+  - Completion is slynk's flex matching (`slynk-completion`), so `mvb`
+    finds `multiple-value-bind`; it reads the symbols in the package
+    the request names
+  - The package comes from the nearest `in-package` above the cursor
+  - Definitions are those of what the image has loaded, no more
+  - `ide/compile` sends a string with the file and the offset it
+    starts at; slynk compiles it as if from that place, so debugger
+    frames find their source and notes carry positions
+  - Code compiled from a string has a buffer, not a file, in its
+    locations; the buffer is named after the file (`buffer` field)
+  - An error while loading compiled code enters the debugger, as with
+    `ide/eval`, and the call returns when it is left
+- jekyl: `base/language.ts` parses the replies; `interface/completion.ts`,
+  `definition.ts` and `diagnostics.ts` are the VS Code providers
+  - None of them starts a Lisp: without a connection they say nothing
+  - Completion is asked for again at each key (the list is marked
+    incomplete), since matches depend on the whole pattern; it is
+    skipped in strings and comments (`lib/completion.ts`)
+  - Arglist and documentation come on `resolveCompletionItem`, when an
+    item is highlighted
+  - A second backend, `document`, completes from the words of the
+    file with no Lisp; the seam for the lighter mode of the editing arm
+  - Automatic or on request only (Ctrl+Alt+I, as Emacs M-TAB) is the
+    editor's quick suggestions for Lisp files;
+    `vsclide.completion.trigger` sets them (VS Code cannot tell typing
+    from a request inside a provider)
+  - Notes become diagnostics (`lib/notes.ts` places them): kept as
+    offsets, moved by edits above them, dropped by edits on them,
+    replaced when the form or file is compiled again
+  - Positions count UTF-16 units in the editor and characters in Lisp;
+    they differ after characters beyond the basic plane
+- Settings: `vsclide.completion.{enabled,trigger,mode,limit,
+  documentation}`, `vsclide.definitions.enabled`,
+  `vsclide.diagnostics.{enabled,minimumSeverity}`
+- Commands: Compile Top-Level Form, Compile and Load File, Clear
+  Compiler Notes
+- Deferred: signature help, the lighter eclector backend, xref
 
 ## Syntax highlighting
 

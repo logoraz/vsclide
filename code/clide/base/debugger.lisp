@@ -11,6 +11,8 @@
                 #:client-rex
                 #:client-call
                 #:client-call-status)
+  (:import-from :clide/base/location
+                #:location-object)
   (:import-from :clide/base/ide
                 #:ide
                 #:require-client
@@ -169,40 +171,6 @@ came of them."
      (frames-array
       (call-in-thread ide params
                       (list (sym "slynk:backtrace") start end))))))
-
-(defun location-file (buffer)
-  "Return the file name in the slynk location BUFFER part, or NIL."
-  (when (consp buffer)
-    (case (first buffer)
-      (:file (second buffer))
-      (:buffer-and-file (third buffer)))))
-
-(defun location-hint (hints key)
-  "Return the value of KEY in the location HINTS, or NIL."
-  (and (listp hints)
-       (evenp (length hints))
-       (ignore-errors (getf hints key))))
-
-(defun location-object (location)
-  "Return the JSON object for LOCATION, what slynk's
-frame-source-location returns: (:LOCATION BUFFER POSITION HINTS) or
-(:ERROR MESSAGE)."
-  (case (and (consp location) (first location))
-    (:location
-     (destructuring-bind (buffer position &optional hints) (rest location)
-       (let ((kind (and (consp position) (first position))))
-         (make-object
-          "file" (json-value (location-file buffer))
-          "position" (json-value (and (eq kind :position) (second position)))
-          "line" (json-value (and (eq kind :line) (second position)))
-          "column" (json-value (and (eq kind :line) (third position)))
-          "snippet" (json-value (location-hint hints :snippet))
-          "error" 'null))))
-    (:error
-     (make-object "file" 'null "position" 'null "line" 'null
-                  "column" 'null "snippet" 'null
-                  "error" (json-value (second location))))
-    (t 'null)))
 
 (defun local-object (local)
   "Return the JSON object for LOCAL, a plist with :NAME, :ID and :VALUE."

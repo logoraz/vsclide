@@ -12,6 +12,14 @@ import {
   parseInspected,
   parseRange,
 } from "./inspector";
+import {
+  CompileResult,
+  Completion,
+  Definition,
+  parseCompileResult,
+  parseCompletions,
+  parseDefinitions,
+} from "./language";
 import { LaunchOptions, LispProcess, startSlynk } from "./process";
 import { Session } from "./session";
 
@@ -503,6 +511,105 @@ export class Ide {
         entry,
         value,
       }),
+    );
+  }
+
+  /** True while connected to slynk. */
+  get connected(): boolean {
+    return this.info !== undefined;
+  }
+
+  /**
+   * Return the symbols that PREFIX completes to, read in PACKAGE if
+   * given, at most LIMIT of them. Nothing when not connected: asking
+   * must not start a Lisp as a side effect of typing.
+   */
+  async complete(
+    prefix: string,
+    packageName?: string,
+    limit?: number,
+  ): Promise<Completion[]> {
+    if (!this.info) return [];
+    return parseCompletions(
+      await this.session.request("ide/complete", {
+        prefix,
+        package: packageName,
+        limit,
+      }),
+    );
+  }
+
+  /** Return the lambda list of NAME, printed, or undefined. */
+  async arglist(
+    name: string,
+    packageName?: string,
+  ): Promise<string | undefined> {
+    if (!this.info) return undefined;
+    const reply = await this.session.request<{ arglist: string | null }>(
+      "ide/arglist",
+      { name, package: packageName },
+    );
+    return reply.arglist ?? undefined;
+  }
+
+  /** Return the documentation of NAME, or undefined when it has none. */
+  async documentation(
+    name: string,
+    packageName?: string,
+  ): Promise<string | undefined> {
+    if (!this.info) return undefined;
+    const reply = await this.session.request<{ text: string | null }>(
+      "ide/documentation",
+      { name, package: packageName },
+    );
+    return reply.text ?? undefined;
+  }
+
+  /**
+   * Return where NAME is defined, in what the image has loaded. Nothing
+   * when not connected.
+   */
+  async definitions(
+    name: string,
+    packageName?: string,
+  ): Promise<Definition[]> {
+    if (!this.info) return [];
+    return parseDefinitions(
+      await this.session.request("ide/definitions", {
+        name,
+        package: packageName,
+      }),
+    );
+  }
+
+  /**
+   * Compile and load CODE, which starts at the character offset
+   * POSITION of FILE, or of an unsaved buffer when there is no FILE.
+   * An error in loading it enters the debugger, and the promise
+   * resolves when the debugger is left.
+   */
+  async compile(
+    code: string,
+    position: number,
+    file?: string,
+    packageName?: string,
+  ): Promise<CompileResult> {
+    await this.connect();
+    return parseCompileResult(
+      await this.session.request("ide/compile", {
+        code,
+        position,
+        file,
+        package: packageName,
+      }),
+    );
+  }
+
+  /** Compile FILE, and load it when LOAD is true. */
+  async compileFile(file: string, load: boolean): Promise<CompileResult> {
+    await this.connect();
+    return parseCompileResult(
+      await this.session.request("ide/compileFile", { file, load }),
     );
   }
 

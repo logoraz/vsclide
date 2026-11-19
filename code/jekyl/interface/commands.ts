@@ -1,5 +1,6 @@
 import * as vscode from "vscode";
 import { EvalResult, Ide } from "../base/ide";
+import { CompileResult, summarize } from "../base/language";
 import {
   Range,
   formBefore,
@@ -8,6 +9,7 @@ import {
   topLevelFormAt,
 } from "../lib/forms";
 import { DebugPanel } from "./debug-panel";
+import { Diagnostics } from "./diagnostics";
 import { ReplView } from "./repl";
 import { Results } from "./results";
 import { Status } from "./status";
@@ -19,6 +21,7 @@ export interface CommandContext {
   status: Status;
   repl: ReplView;
   panel: DebugPanel;
+  diagnostics: Diagnostics;
   output: vscode.OutputChannel;
 }
 
@@ -113,6 +116,83 @@ async function guarded(
   }
 }
 
+/** Say what compiling came to: in the log and briefly in the status bar. */
+function report(context: CommandContext, result: CompileResult): void {
+  const line = summarize(result);
+  context.output.appendLine(`;; ${line}`);
+  for (const note of result.notes) {
+    const first = note.message.split("\n")[0];
+    context.output.appendLine(`;;   ${note.severity}: ${first}`);
+  }
+  void vscode.window.setStatusBarMessage(`VSCLIDE: ${line}`, 5000);
+}
+
+/**
+ * Compile and load the selection, or else the top-level form at the
+ * cursor, from its place in the file, so that the debugger can show
+ * its source, and show what the compiler says of it.
+ */
+async function compileForm(context: CommandContext): Promise<void> {
+  const editor = lispEditor();
+  if (!editor) return;
+  const document = editor.document;
+  const text = document.getText();
+  const offset = document.offsetAt(editor.selection.active);
+  const span = editor.selection.isEmpty
+    ? topLevelFormAt(text, offset, scanForms(text))
+    : {
+        start: document.offsetAt(editor.selection.start),
+        end: document.offsetAt(editor.selection.end),
+      };
+  if (!span) {
+    void vscode.window.showInformationMessage("VSCLIDE: no form here.");
+    return;
+  }
+  const file =
+    document.uri.scheme === "file" ? document.uri.fsPath : undefined;
+  context.status.connecting();
+  const result = await context.ide.compile(
+    text.slice(span.start, span.end),
+    span.start,
+    file,
+    packageAt(text, span.start),
+  );
+  context.status.render();
+  context.diagnostics.update(document, span, result);
+  report(context, result);
+}
+
+/**
+ * Save, compile and load the file of the active editor, and show what
+ * the compiler says of it. The fasl goes where compile-file puts it,
+ * next to the source.
+ */
+async function compileFile(context: CommandContext): Promise<void> {
+  const editor = lispEditor();
+  if (!editor) return;
+  const document = editor.document;
+  if (document.uri.scheme !== "file") {
+    void vscode.window.showInformationMessage(
+      "VSCLIDE: save the file before compiling it.",
+    );
+    return;
+  }
+  await document.save();
+  context.status.connecting();
+  const result = await context.ide.compileFile(document.uri.fsPath, true);
+  context.status.render();
+  const notes = result.notes.filter(
+    (note) =>
+      !note.location?.file || note.location.file === document.uri.fsPath,
+  );
+  context.diagnostics.update(
+    document,
+    { start: 0, end: document.getText().length },
+    { ...result, notes },
+  );
+  report(context, result);
+}
+
 /**
  * Ask for a form and inspect its value. The box offers the selection,
  * or else the form before the cursor, as the default.
@@ -189,6 +269,13 @@ export function registerCommands(
     register("evalSelection", () =>
       evaluateIn(context, (_text, _offset, selection) => selection),
     ),
+    register("compileTopLevelForm", () =>
+      guarded(context, () => compileForm(context)),
+    ),
+    register("compileFile", () =>
+      guarded(context, () => compileFile(context)),
+    ),
+    register("clearNotes", async () => context.diagnostics.clear()),
     register("openRepl", () => guarded(context, () => context.repl.open())),
     register("newRepl", () => guarded(context, () => context.repl.create())),
     register("closeRepl", () =>

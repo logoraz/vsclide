@@ -3,6 +3,7 @@ import {
   DebugLevel,
   DebugModel,
   FRAME_BATCH,
+  locationFile,
 } from "../base/debugger";
 import { Ide, IdeEvent } from "../base/ide";
 import { InspectorModel } from "../base/inspector";
@@ -233,10 +234,11 @@ export class DebugPanel implements vscode.Disposable {
   private async openSource(level: DebugLevel, index: number): Promise<void> {
     await this.loadDetails(level, index);
     const location = level.details[index]?.location;
-    if (!location?.file) {
+    const file = location ? locationFile(location) : null;
+    if (!location || !file) {
       throw new Error(location?.error ?? "this frame has no source file");
     }
-    const document = await vscode.workspace.openTextDocument(location.file);
+    const document = await vscode.workspace.openTextDocument(file);
     const offset = locationOffset(document.getText(), location);
     const editor = await vscode.window.showTextDocument(document, {
       viewColumn: vscode.ViewColumn.One,

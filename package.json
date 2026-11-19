@@ -2,7 +2,7 @@
   "name": "vsclide",
   "displayName": ":VSCLIDE",
   "description": "A full-powered Common Lisp IDE for VS Code.",
-  "version": "0.0.5",
+  "version": "0.0.6",
   "publisher": "locutus",
   "license": "MIT",
   "repository": {
@@ -69,6 +69,18 @@
       {
         "command": "vsclide.evalSelection",
         "title": "VSCLIDE: Evaluate Selection"
+      },
+      {
+        "command": "vsclide.compileTopLevelForm",
+        "title": "VSCLIDE: Compile Top-Level Form"
+      },
+      {
+        "command": "vsclide.compileFile",
+        "title": "VSCLIDE: Compile and Load File"
+      },
+      {
+        "command": "vsclide.clearNotes",
+        "title": "VSCLIDE: Clear Compiler Notes"
       },
       {
         "command": "vsclide.showOutput",
@@ -151,6 +163,62 @@
           "type": "boolean",
           "default": true,
           "description": "Show Sylvester's art in a new mREPL."
+        },
+        "vsclide.completion.enabled": {
+          "type": "boolean",
+          "default": true,
+          "description": "Complete symbols in Common Lisp files."
+        },
+        "vsclide.completion.trigger": {
+          "type": "string",
+          "enum": [
+            "automatic",
+            "manual"
+          ],
+          "default": "automatic",
+          "description": "Open completion as you type, or only on request (Ctrl+Alt+I)."
+        },
+        "vsclide.completion.mode": {
+          "type": "string",
+          "enum": [
+            "slynk",
+            "document"
+          ],
+          "default": "slynk",
+          "description": "slynk: symbols from the Lisp. document: words of the file, no Lisp needed."
+        },
+        "vsclide.completion.limit": {
+          "type": "number",
+          "default": 100,
+          "minimum": 10,
+          "maximum": 1000,
+          "description": "Most completions to offer."
+        },
+        "vsclide.completion.documentation": {
+          "type": "boolean",
+          "default": true,
+          "description": "Show arglist and docstring beside the highlighted completion."
+        },
+        "vsclide.definitions.enabled": {
+          "type": "boolean",
+          "default": true,
+          "description": "Go to definition (F12, Ctrl+click) from what the Lisp has loaded."
+        },
+        "vsclide.diagnostics.enabled": {
+          "type": "boolean",
+          "default": true,
+          "description": "Show compiler notes as squiggles and in the Problems panel."
+        },
+        "vsclide.diagnostics.minimumSeverity": {
+          "type": "string",
+          "enum": [
+            "error",
+            "warning",
+            "information",
+            "hint"
+          ],
+          "default": "information",
+          "description": "Least serious compiler note to show."
         }
       }
     },
@@ -169,6 +237,21 @@
         "command": "vsclide.evalSelection",
         "key": "ctrl+alt+shift+r",
         "when": "editorLangId == commonlisp && editorHasSelection"
+      },
+      {
+        "command": "vsclide.compileTopLevelForm",
+        "key": "ctrl+alt+c",
+        "when": "editorLangId == commonlisp"
+      },
+      {
+        "command": "vsclide.compileFile",
+        "key": "ctrl+alt+k",
+        "when": "editorLangId == commonlisp"
+      },
+      {
+        "command": "editor.action.triggerSuggest",
+        "key": "ctrl+alt+i",
+        "when": "editorLangId == commonlisp && editorTextFocus"
       },
       {
         "command": "vsclide.openRepl",

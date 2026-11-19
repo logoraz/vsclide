@@ -26,6 +26,11 @@ export interface Local {
  */
 export interface SourceLocation {
   file: string | null;
+  /**
+   * The buffer the code was compiled from, which ide/compile names
+   * after the file; code compiled from a string has no file of its own.
+   */
+  buffer: string | null;
   /** A character position, counted from 1 as Emacs does. */
   position: number | null;
   line: number | null;
@@ -95,6 +100,19 @@ export function parseFrames(value: unknown): Frame[] {
   }));
 }
 
+/**
+ * Return the file LOCATION is in: its file, else its buffer when that
+ * names a file, which it does for code compiled by VSCLIDE. Otherwise
+ * null.
+ */
+export function locationFile(location: SourceLocation): string | null {
+  if (location.file) return location.file;
+  if (location.buffer && /^(\/|[A-Za-z]:[\\/])/.test(location.buffer)) {
+    return location.buffer;
+  }
+  return null;
+}
+
 /** Return a source location from VALUE, or null when it is not one. */
 export function parseLocation(value: unknown): SourceLocation | null {
   if (typeof value !== "object" || value === null) return null;
@@ -105,6 +123,7 @@ export function parseLocation(value: unknown): SourceLocation | null {
     typeof field === "number" ? field : null;
   return {
     file: optional(p.file),
+    buffer: optional(p.buffer),
     position: optionalNumber(p.position),
     line: optionalNumber(p.line),
     column: optionalNumber(p.column),

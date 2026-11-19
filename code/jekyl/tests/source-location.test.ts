@@ -7,6 +7,7 @@ import { locationOffset } from "../lib/source-location";
 function location(fields: Partial<SourceLocation>): SourceLocation {
   return {
     file: "/a.lisp",
+    buffer: null,
     position: null,
     line: null,
     column: null,

@@ -10,6 +10,10 @@
                 #:register-debugger-methods)
   (:import-from :clide/base/inspector
                 #:register-inspector-methods)
+  (:import-from :clide/base/language
+                #:register-language-methods)
+  (:import-from :clide/base/compiler
+                #:register-compiler-methods)
   (:export #:main)
   (:documentation "Entry point for the clide process."))
 
@@ -20,14 +24,16 @@
 
 (defun register-builtin-methods (server)
   "Register the built-in methods on SERVER: ping, the ide/ methods and
-the debugger and inspector methods."
+the debugger, inspector, language and compiler methods."
   (register-method server "ping"
                    (lambda (params)
                      (declare (ignore params))
                      "pong"))
   (let ((ide (register-ide-methods server)))
     (register-debugger-methods ide)
-    (register-inspector-methods ide)))
+    (register-inspector-methods ide)
+    (register-language-methods ide)
+    (register-compiler-methods ide)))
 
 (defun log-to-stderr (control &rest args)
   "Write a formatted log line to standard error.
