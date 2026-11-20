@@ -22,6 +22,7 @@ import {
   parseReferences,
   Reference,
 } from "./language";
+import { LiveRule, toLiveRules } from "../lib/indent-rules";
 import { LaunchOptions, LispProcess, startSlynk } from "./process";
 import {
   Playhead,
@@ -90,7 +91,8 @@ export type IdeEvent =
   | { type: "debugOpen"; level: DebugLevel }
   | { type: "debugActivate"; threadId: number; level: number }
   | { type: "debugReturn"; threadId: number; level: number; stepping: boolean }
-  | { type: "debugCondition"; threadId: number; message: string };
+  | { type: "debugCondition"; threadId: number; message: string }
+  | { type: "indentation"; rules: LiveRule[] };
 
 type Params = Record<string, unknown>;
 
@@ -151,6 +153,8 @@ export function parseNotification(
         replId: num(p.replId),
         mode: text(p.mode),
       };
+    case "ide/indentation":
+      return { type: "indentation", rules: toLiveRules(p.rules) };
     case "ide/repl/cleared":
       return { type: "replCleared", replId: num(p.replId) };
     case "ide/debug/open":
@@ -266,6 +270,18 @@ export class Ide {
       "ide/sylvesters",
     );
     return reply.text ?? undefined;
+  }
+
+  /**
+   * Have the Lisp send the indentation rules of the macros it knows, now
+   * and as more code is loaded; they arrive as "indentation" events.
+   * Resolve with false when its slynk has no indentation contrib.
+   */
+  async startIndentation(): Promise<boolean> {
+    const reply = await this.session.request<{ loaded: boolean }>(
+      "ide/indentation",
+    );
+    return reply.loaded === true;
   }
 
   /** Open a REPL and resolve with its id. */

@@ -25,7 +25,8 @@
                              (:file "debugger"  :depends-on ("ide" "location" "stickers"))
                              (:file "inspector" :depends-on ("ide"))
                              (:file "language"  :depends-on ("ide" "location"))
-                             (:file "compiler"  :depends-on ("ide" "location"))))
+                             (:file "compiler"  :depends-on ("ide" "location"))
+                             (:file "indentation" :depends-on ("ide"))))
                (:module "interface"
                 :pathname "./"
                 :depends-on ("lib" "base")

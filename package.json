@@ -44,6 +44,14 @@
     ],
     "commands": [
       {
+        "command": "vsclide.indent",
+        "title": "VSCLIDE: Indent Line or Region"
+      },
+      {
+        "command": "vsclide.newlineAndIndent",
+        "title": "VSCLIDE: New Line and Indent"
+      },
+      {
         "command": "vsclide.connect",
         "title": "VSCLIDE: Connect"
       },
@@ -306,6 +314,16 @@
       }
     },
     "keybindings": [
+      {
+        "command": "vsclide.indent",
+        "key": "tab",
+        "when": "editorTextFocus && editorLangId == commonlisp && !editorReadonly && !editorTabMovesFocus && !suggestWidgetVisible && !inSnippetMode && !inlineSuggestionVisible"
+      },
+      {
+        "command": "vsclide.newlineAndIndent",
+        "key": "enter",
+        "when": "editorTextFocus && editorLangId == commonlisp && !editorReadonly && !suggestWidgetVisible && !inSnippetMode && !renameInputVisible"
+      },
       {
         "command": "vsclide.evalTopLevelForm",
         "key": "alt+enter",

@@ -18,6 +18,8 @@ A full-powered Common Lisp IDE for VS Code.
   and source locations
 - **Stickers:** SLY's stickers; mark forms, record values, replay them
 - **Breakpoints:** the gutter's, on top of stickers
+- **Indentation:** Emacs-style Tab and Enter, from the rules of the macros
+  your Lisp has loaded
 - **Syntax highlighting:** its own grammar; your theme stays as it is
 - **Key bindings:** a VS Code style set and an SLY and Emacs set
 - **Linux and Windows:** the same extension and the same Lisp side on both
@@ -90,17 +92,17 @@ first evaluation starts Lisp, or run `VSCLIDE: Connect`.
   [docs/keybindings.md](docs/keybindings.md).
 - Settings, all under `vsclide.`:
 
-  | Setting                | Controls                                          |
-  | ---------------------- | ------------------------------------------------- |
-  | `lisp.command`         | the Lisp executable (default `sbcl`)              |
-  | `keymap`               | the key set: `auto`, `vscode` or `emacs`          |
-  | `repl.*`               | opening on connect, Sylvester's art, package sync |
-  | `completion.*`         | the completion source, limit and documentation    |
-  | `definitions.enabled`  | go to definition                                  |
-  | `references.*`         | find all references, and which kinds it searches  |
-  | `diagnostics.*`        | compiler notes in the editor                      |
-  | `signatureHelp.*`      | the lambda list popup                             |
-  | `stickers.autoRefresh` | fetching recordings after code runs               |
+  | Setting | Controls |
+  | --- | --- |
+  | `lisp.command` | the Lisp executable (default `sbcl`) |
+  | `keymap` | the key set: `auto`, `vscode` or `emacs` |
+  | `repl.*` | opening on connect, Sylvester's art, package sync |
+  | `completion.*` | the completion source, limit and documentation |
+  | `definitions.enabled` | go to definition |
+  | `references.*` | find all references, and which kinds it searches |
+  | `diagnostics.*` | compiler notes in the editor |
+  | `signatureHelp.*` | the lambda list popup |
+  | `stickers.autoRefresh` | fetching recordings after code runs |
 
 VSCLIDE never changes your settings.
 

@@ -46,6 +46,7 @@
            #:json-value
            #:json-array
            #:notify
+           #:require-module
            #:ensure-stickers)
   (:documentation "IDE methods: connect to slynk, evaluate, REPLs."))
 

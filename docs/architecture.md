@@ -42,7 +42,7 @@ vsclide/
 │       │                     inspector, panel, language, stickers
 │       ├── lib/              jsonrpc, forms, source-location,
 │       │                     completion, notes, signature, stickers,
-│       │                     keymap, sylvester
+│       │                     keymap, sylvester, indent*
 │       ├── interface/        everything that touches the VS Code API
 │       ├── webview/          page scripts of the REPL and debugger
 │       │                     (own tsconfig, DOM)
@@ -294,6 +294,31 @@ vsclide/
   - Breakpoints arm when compiled; plain evaluation does not instrument
   - Notes of a form compiled with stickers have positions shifted by the
     wrapping text
+
+## Indentation
+
+- Tab, Enter, Format Selection and Format Document place lines the way
+  an Emacs Lisp mode does (`interface/indent.ts`); the work is in
+  `lib/indent.ts`, with the scan in `lib/indent-text.ts`, the rules in
+  `lib/indent-rules.ts` and `loop` in `lib/indent-loop.ts`
+  - The line is placed from the operator of the call it is in, by that
+    operator's rule, and from the calls around it when the operator has
+    none; where no rule applies, arguments align under the first
+  - `if` hangs the then clause 4 columns and the else clause 2
+  - Offsets in a rule count from the opening parenthesis of the innermost
+    list that holds the line; specs are numbers, `&body`, `&rest`,
+    `&lambda`, `&whole` and nil, as slynk sends them
+  - Lines inside strings and block comments are left alone; `;;;` goes to
+    column 0; indentation is always spaces
+- Rules: a table for the standard operators ships in the extension. The
+  running Lisp adds the rest: `ide/indentation` (`base/indentation.lisp`)
+  loads slynk's indentation contrib, which works rules out from macro
+  arglists, and slynk sends them as `ide/indentation` notifications, for
+  everything loaded when asked and, after each call, for what code in the
+  current package has defined. A user's macros gain rules when their file
+  is loaded; nothing is loaded on the user's behalf
+- Without a connection the table alone applies; a new connection starts
+  from the table again
 
 ## Key bindings
 

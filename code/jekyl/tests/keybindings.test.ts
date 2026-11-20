@@ -21,12 +21,16 @@ function keymap(name: string): Binding[] {
   return bindings.filter((b) => b.when.includes(`vsclide.activeKeymap == '${name}'`));
 }
 
-test("every binding belongs to exactly one key map", () => {
+/** Editing keys that every key map shares, so they name no key map. */
+const SHARED = new Set(["vsclide.indent", "vsclide.newlineAndIndent"]);
+
+test("every binding belongs to exactly one key map, or is shared", () => {
   for (const binding of bindings) {
     const maps = ["vscode", "emacs"].filter((name) =>
       binding.when.includes(`vsclide.activeKeymap == '${name}'`),
     );
-    assert.equal(maps.length, 1, `${binding.key} ${binding.command}`);
+    const expected = SHARED.has(binding.command) ? 0 : 1;
+    assert.equal(maps.length, expected, `${binding.key} ${binding.command}`);
   }
 });
 
