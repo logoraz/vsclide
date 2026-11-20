@@ -2,7 +2,7 @@
   "name": "vsclide",
   "displayName": ":VSCLIDE",
   "description": "A full-powered Common Lisp IDE for VS Code.",
-  "version": "0.0.9",
+  "version": "0.1.0",
   "publisher": "logoraz",
   "license": "MIT",
   "repository": {
@@ -261,7 +261,14 @@
           "type": "array",
           "items": {
             "type": "string",
-            "enum": ["calls", "macroexpands", "binds", "references", "sets", "specializes"],
+            "enum": [
+              "calls",
+              "macroexpands",
+              "binds",
+              "references",
+              "sets",
+              "specializes"
+            ],
             "enumDescriptions": [
               "Functions that call it.",
               "Code that expands it, for a macro.",
@@ -272,7 +279,14 @@
             ]
           },
           "uniqueItems": true,
-          "default": ["calls", "macroexpands", "binds", "references", "sets", "specializes"],
+          "default": [
+            "calls",
+            "macroexpands",
+            "binds",
+            "references",
+            "sets",
+            "specializes"
+          ],
           "description": "The kinds of reference Find All References searches, as SLY's sly-edit-uses does by default. An empty list searches them all."
         },
         "vsclide.repl.syncPackage": {
@@ -310,6 +324,16 @@
           "type": "boolean",
           "default": true,
           "description": "Fetch what stickers recorded after code runs, so the stickers show it."
+        },
+        "vsclide.highlighting.loadedMacros": {
+          "type": "boolean",
+          "default": true,
+          "description": "Colour calls to macros loaded in the Lisp image like the standard macros."
+        },
+        "vsclide.highlighting.suppressedForms": {
+          "type": "boolean",
+          "default": true,
+          "description": "Draw forms removed by #+ and #- as comments, judged by the features of the Lisp image."
         }
       }
     },
@@ -626,6 +650,12 @@
             }
           },
           {
+            "scope": "constant.other.feature.commonlisp",
+            "settings": {
+              "foreground": "#b8d0f8"
+            }
+          },
+          {
             "scope": "constant.other.keyword.commonlisp",
             "settings": {
               "foreground": "#b8d0f8"
@@ -740,6 +770,9 @@
             }
           }
         ]
+      },
+      "[commonlisp]": {
+        "editor.semanticHighlighting.enabled": true
       }
     },
     "breakpoints": [
@@ -786,6 +819,26 @@
           "light": "#dc262633",
           "highContrast": "#f8514966",
           "highContrastLight": "#f8514966"
+        }
+      }
+    ],
+    "semanticTokenTypes": [
+      {
+        "id": "suppressed",
+        "superType": "comment",
+        "description": "A form removed by a reader feature expression."
+      }
+    ],
+    "semanticTokenScopes": [
+      {
+        "language": "commonlisp",
+        "scopes": {
+          "macro": [
+            "keyword.control.commonlisp"
+          ],
+          "suppressed": [
+            "comment.block.commonlisp"
+          ]
         }
       }
     ]

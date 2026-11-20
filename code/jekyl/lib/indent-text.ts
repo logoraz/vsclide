@@ -42,7 +42,7 @@ export function isSpace(char: string | undefined): boolean {
 const DELIMITERS = new Set(["(", ")", '"', ";", "`", ","]);
 
 /** Return true when CHAR ends a token. */
-function isDelimiter(char: string): boolean {
+export function isDelimiter(char: string): boolean {
   return isSpace(char) || DELIMITERS.has(char);
 }
 
@@ -81,7 +81,7 @@ function formStart(text: string, to: number): number {
 }
 
 /** Return the end of the string from I, or -1 if it is open at TO. */
-function stringEnd(text: string, i: number, to: number): number {
+export function stringEnd(text: string, i: number, to: number): number {
   let j = i + 1;
   while (j < to) {
     if (text[j] === "\\") {
@@ -96,7 +96,7 @@ function stringEnd(text: string, i: number, to: number): number {
 }
 
 /** Return the end of the block comment from I, or -1 if open at TO. */
-function blockEnd(text: string, i: number, to: number): number {
+export function blockEnd(text: string, i: number, to: number): number {
   let depth = 0;
   let j = i;
   while (j < to) {
@@ -116,7 +116,7 @@ function blockEnd(text: string, i: number, to: number): number {
 }
 
 /** Return the end of the token from I, or -1 if a |symbol| is open. */
-function tokenEnd(text: string, i: number, to: number): number {
+export function tokenEnd(text: string, i: number, to: number): number {
   let j = i;
   while (j < to && !isDelimiter(text[j])) {
     if (text[j] === "|") {

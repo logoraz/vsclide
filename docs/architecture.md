@@ -42,7 +42,8 @@ vsclide/
 │       │                     inspector, panel, language, stickers
 │       ├── lib/              jsonrpc, forms, source-location,
 │       │                     completion, notes, signature, stickers,
-│       │                     keymap, sylvester, indent*
+│       │                     keymap, sylvester, indent*, features,
+│       │                     highlight
 │       ├── interface/        everything that touches the VS Code API
 │       ├── webview/          page scripts of the REPL and debugger
 │       │                     (own tsconfig, DOM)
@@ -319,6 +320,26 @@ vsclide/
   is loaded; nothing is loaded on the user's behalf
 - Without a connection the table alone applies; a new connection starts
   from the table again
+
+## Highlighting beyond the grammar
+
+- Semantic tokens (`interface/highlight.ts`, scan in `lib/highlight.ts`)
+  add what a grammar cannot know; both kinds follow the image and can be
+  turned off with `vsclide.highlighting.loadedMacros` and
+  `vsclide.highlighting.suppressedForms`
+  - Loaded macros: the operator of a call whose symbol has a rule from
+    the Lisp (see Indentation) gets the `macro` token, which
+    `semanticTokenScopes` maps to the scope of the standard macros;
+    quoted data, strings and comments hold no calls
+  - Suppressed forms: the form after `#+` or `#-` is drawn as a comment
+    (the `suppressed` token) when the feature expression says so
+- Features come from the image, as slynk does for SLY: `ide/connect`
+  returns its `*features*` and clide sends `ide/features` when they
+  change (`lib/features.ts`). With no image, only `common-lisp`,
+  `ansi-cl` and `nil` are decided; an expression that cannot be decided
+  suppresses nothing
+- Rules and features arrive after the files are open, so the open files
+  are coloured again when either changes
 
 ## Key bindings
 

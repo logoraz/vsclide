@@ -2,7 +2,7 @@
 
 A full-powered Common Lisp IDE for VS Code.
 
-> **Status:** early development, version 0.0.9. Install it from a VSIX
+> **Status:** early development, version 0.1.0. Install it from a VSIX
 > you build yourself (below); there is no marketplace release yet.
 
 
@@ -20,9 +20,11 @@ A full-powered Common Lisp IDE for VS Code.
 - **Breakpoints:** the gutter's, on top of stickers
 - **Indentation:** Emacs-style Tab and Enter, from the rules of the macros
   your Lisp has loaded
-- **Syntax highlighting:** its own grammar; your theme stays as it is
+- **Syntax highlighting:** its own grammar; your theme stays as it is,
+  plus loaded macros coloured like the standard ones, and forms that
+  `#+` and `#-` remove for your Lisp's features drawn as comments
 - **Key bindings:** a VS Code style set and an SLY and Emacs set
-- **Linux and Windows:** the same extension and the same Lisp side on both
+- **Linux & Windows:** the same extension and the same Lisp side on both
 
 
 ## How it works

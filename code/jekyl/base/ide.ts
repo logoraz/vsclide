@@ -52,6 +52,8 @@ export interface ConnectionInfo {
   };
   package: { name: string | null; prompt: string | null };
   protocolVersion: string | null;
+  /** The features of the image, lower case; absent from older clide. */
+  features?: string[];
 }
 
 /** The outcome of evaluating code. A Lisp error has ok false. */
@@ -92,7 +94,8 @@ export type IdeEvent =
   | { type: "debugActivate"; threadId: number; level: number }
   | { type: "debugReturn"; threadId: number; level: number; stepping: boolean }
   | { type: "debugCondition"; threadId: number; message: string }
-  | { type: "indentation"; rules: LiveRule[] };
+  | { type: "indentation"; rules: LiveRule[] }
+  | { type: "features"; features: string[] };
 
 type Params = Record<string, unknown>;
 
@@ -155,6 +158,13 @@ export function parseNotification(
       };
     case "ide/indentation":
       return { type: "indentation", rules: toLiveRules(p.rules) };
+    case "ide/features":
+      return {
+        type: "features",
+        features: Array.isArray(p.features)
+          ? p.features.filter((f): f is string => typeof f === "string")
+          : [],
+      };
     case "ide/repl/cleared":
       return { type: "replCleared", replId: num(p.replId) };
     case "ide/debug/open":

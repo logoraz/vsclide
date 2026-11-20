@@ -401,14 +401,17 @@ export interface LineIndent {
 /**
  * Return the indentation of lines FIRST to LAST of TEXT, in order, for
  * the lines that need to change. Each line is placed with the lines
- * before it already moved, as an Emacs indent-region does, and blank
- * lines and lines inside strings are left alone.
+ * before it already moved, as an Emacs indent-region does. Lines inside
+ * strings are left alone, and so are blank lines unless BLANK is true,
+ * as it is for the line a cursor is on: a new line after a form goes to
+ * the column where the next form starts.
  */
 export function indentRegion(
   text: string,
   first: number,
   last: number,
   rules: IndentRules,
+  blank = false,
 ): LineIndent[] {
   const lines = text.split("\n");
   let working = text;
@@ -421,7 +424,7 @@ export function indentRegion(
     const line = lines[n];
     const leading = /^[ \t]*/.exec(line)?.[0].length ?? 0;
     let length = line.length;
-    if (line.trim() !== "") {
+    if (blank || line.trim() !== "") {
       const column = indentLine(working, offset, rules);
       if (column !== undefined && !isIndent(line, leading, column)) {
         working =

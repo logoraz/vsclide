@@ -116,16 +116,44 @@
           "match": "#'"
         },
         {
-          "name": "keyword.control.conditional.commonlisp",
-          "match": "#[+-]"
+          "begin": "(#[+-])\\s*(?=\\()",
+          "beginCaptures": {
+            "1": { "name": "keyword.control.conditional.commonlisp" }
+          },
+          "end": "(?<=\\))",
+          "patterns": [
+            { "include": "#feature-list" }
+          ]
+        },
+        {
+          "match": "(#[+-])\\s*([^\\s()'\\\"`;,|]+)",
+          "captures": {
+            "1": { "name": "keyword.control.conditional.commonlisp" },
+            "2": { "name": "constant.other.feature.commonlisp" }
+          }
         },
         {
           "name": "keyword.operator.commonlisp",
-          "match": "#\\.|#P(?=\\\")|#p(?=\\\")|#[0-9]*[Aa](?=\\()|#[0-9]*(?=\\()|#\\*(?=[01])"
+          "match": "#\\.|#P(?=\\\")|#p(?=\\\")|#[0-9]*[Aa](?=\\()|#[0-9]*(?=\\()|#[SsCc](?=\\()|#[0-9]+[=#]|#\\*(?=[01])"
         },
         {
           "name": "keyword.operator.quote.commonlisp",
           "match": "'|`|,@|,"
+        }
+      ]
+    },
+    "feature-list": {
+      "begin": "\\(",
+      "end": "\\)",
+      "patterns": [
+        { "include": "#feature-list" },
+        {
+          "name": "keyword.control.conditional.commonlisp",
+          "match": "(?i)(?<=\\(|\\s)(?::?)(?:and|or|not)(?=[\\s()])"
+        },
+        {
+          "name": "constant.other.feature.commonlisp",
+          "match": "[^\\s()'\\\"`;,|]+"
         }
       ]
     },

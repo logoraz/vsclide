@@ -76,18 +76,22 @@ export class Indentation
       : range.end.line;
   }
 
-  /** Return where the lines FIRST to LAST of DOCUMENT should go. */
+  /**
+   * Return where the lines FIRST to LAST of DOCUMENT should go. Blank
+   * lines are placed only when BLANK is true.
+   */
   private placements(
     document: vscode.TextDocument,
     first: number,
     last: number,
+    blank = false,
   ): Placement[] {
     const text = document.getText();
     this.packageName = packageAt(
       text,
       document.offsetAt(new vscode.Position(first, 0)),
     );
-    return indentRegion(text, first, last, this.rules);
+    return indentRegion(text, first, last, this.rules, blank);
   }
 
   /** Return the edits that move lines FIRST to LAST to their places. */
@@ -116,8 +120,10 @@ export class Indentation
     const ranges = this.mergedLines(selections);
     const moved = new Map<number, Placement>();
     const before = new Map<number, number>();
+    const blank = selections.every((selection) => selection.isEmpty);
     for (const [first, last] of ranges) {
-      for (const placement of this.placements(document, first, last)) {
+      const placed = this.placements(document, first, last, blank);
+      for (const placement of placed) {
         moved.set(placement.line, placement);
       }
     }
@@ -209,7 +215,7 @@ export class Indentation
     const moved = new Map<number, Placement>();
     for (const line of lines) {
       before.set(line, document.lineAt(line).firstNonWhitespaceCharacterIndex);
-      for (const placement of this.placements(document, line, line)) {
+      for (const placement of this.placements(document, line, line, true)) {
         moved.set(line, placement);
       }
     }

@@ -295,3 +295,14 @@ test("a spec from slynk with a destructuring head indents", () => {
   (work)
   (more))`, rules);
 });
+
+test("a blank line is placed when asked, as after Enter", () => {
+  const rules = new IndentRules();
+  assert.deepEqual(indentRegion("(if test\n  ", 1, 1, rules, true), [
+    { line: 1, column: 4 },
+  ]);
+  assert.deepEqual(indentRegion("(a (b))\n  ", 1, 1, rules, true), [
+    { line: 1, column: 0 },
+  ]);
+  assert.deepEqual(indentRegion("(if test\n  ", 1, 1, rules), []);
+});

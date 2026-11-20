@@ -58,6 +58,7 @@
 ;;; The methods registered here are what jekyl calls.  Requests:
 ;;;
 ;;;   ide/connect {host?, port}          connect, return implementation info
+;;;                                      and the features of the image
 ;;;   ide/disconnect                     drop the connection
 ;;;   ide/eval {code, package?, debug?}  evaluate, return output and value;
 ;;;                                      with debug, an error enters the
@@ -77,6 +78,7 @@
 ;;;
 ;;;   ide/disconnected {reason}          the slynk connection ended
 ;;;   ide/output {text}                  output with no REPL to take it
+;;;   ide/features {features}            the features of the image changed
 ;;;   ide/repl/output {replId, text}
 ;;;   ide/repl/prompt {replId, package, nickname, level, entry, condition}
 ;;;   ide/repl/values {replId, values: [{text, index, value}]}
@@ -157,6 +159,12 @@ integer."
   "Return LIST as a vector, which JSON writes as an array even if empty."
   (coerce list 'simple-vector))
 
+(defun feature-names (features)
+  "Return the names in FEATURES, the list of features slynk sends, as a
+vector of lower case strings."
+  (json-array (loop :for feature :in (and (listp features) features)
+                    :collect (json-value feature))))
+
 (defun notify (ide method &rest pairs)
   "Notify every client of METHOD with an object made from PAIRS."
   (broadcast (ide-server ide) method (apply #'make-object pairs)))
@@ -186,6 +194,7 @@ connection-info call returns."
                          "name" (field implementation :name)
                          "version" (field implementation :version)
                          "program" (field implementation :program))
+       "features" (feature-names (getf info :features))
        "pid" (field info :pid)
        "style" (field info :style)
        "machine" (make-object "instance" (field machine :instance)
@@ -230,6 +239,9 @@ entered the debugger would wait for ever."
     (cond (handler (funcall handler ide event))
           ((eq (first event) :closed)
            (connection-closed ide client (second event)))
+          ((eq (first event) :new-features)
+           (notify ide "ide/features"
+                   "features" (feature-names (second event))))
           ((eq (first event) :write-string)
            (when (stringp (second event))
              (notify ide "ide/output" "text" (second event))))

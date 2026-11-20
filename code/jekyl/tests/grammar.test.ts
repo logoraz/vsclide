@@ -125,3 +125,11 @@ test("uninterned symbols are one token", async () => {
     "constant.other.uninterned");
   await expectScope("(:use :cl)", ":use", "constant.other.keyword");
 });
+
+test("feature expressions and more reader syntax", async () => {
+  await expectScope("#+sbcl (a)", "sbcl", "constant.other.feature");
+  await expectScope("#-(or sbcl ccl) a", "or", "keyword.control.conditional");
+  await expectScope("#-(or sbcl ccl) a", "ccl", "constant.other.feature");
+  await expectScope("(f #S(point :x 1))", "#S", "keyword.operator");
+  await expectScope("(f '#1=(a . #1#))", "#1=", "keyword.operator");
+});

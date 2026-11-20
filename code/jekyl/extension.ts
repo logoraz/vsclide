@@ -14,6 +14,7 @@ import { DebugPanel } from "./interface/debug-panel";
 import { DefinitionProvider } from "./interface/definition";
 import { ReferenceProvider } from "./interface/references";
 import { Diagnostics } from "./interface/diagnostics";
+import { Highlighting } from "./interface/highlight";
 import { Indentation } from "./interface/indent";
 import { Keymap } from "./interface/keymap";
 import { ReplView, VIEW_ID } from "./interface/repl";
@@ -118,6 +119,7 @@ export function activate(context: vscode.ExtensionContext): void {
   const diagnostics = new Diagnostics();
   const stickers = new Stickers(ide, panel);
   const indentation = new Indentation(ide);
+  const highlighting = new Highlighting(ide, indentation.rules);
   const repl = new ReplView(
     context.extensionUri,
     ide,
@@ -133,6 +135,12 @@ export function activate(context: vscode.ExtensionContext): void {
     stickers,
     new Keymap(),
     ...indentation.register(),
+    ...highlighting.register(),
+    vscode.languages.registerDocumentSemanticTokensProvider(
+      LISP,
+      highlighting,
+      highlighting.legend,
+    ),
     vscode.languages.registerDocumentRangeFormattingEditProvider(
       LISP,
       indentation,

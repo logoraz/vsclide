@@ -228,6 +228,11 @@ export class IndentRules {
     this.live.clear();
   }
 
+  /** Return whether the Lisp has given a rule for NAME, as written. */
+  hasLive(written: string): boolean {
+    return this.live.has(ruleName(written));
+  }
+
   /** Return how many symbols the Lisp has given rules for. */
   get size(): number {
     return this.live.size;
