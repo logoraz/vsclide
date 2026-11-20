@@ -2,6 +2,13 @@ import { ClideProcess, LaunchOptions, startClide } from "./process";
 import { NotificationListener, RpcClient } from "../lib/jsonrpc";
 
 /**
+ * How long clide has to answer initialize once it has announced its
+ * port. A start that has got that far answers at once; a stall here
+ * would otherwise wait for ever, with nothing to show for it.
+ */
+const INITIALIZE_TIMEOUT_MS = 30_000;
+
+/**
  * One clide process and its authenticated connection, started on
  * first use and restarted after the process exits.
  */
@@ -79,7 +86,11 @@ export class Session {
       );
     });
     try {
-      await client.request("initialize", { token: clide.token });
+      await client.request(
+        "initialize",
+        { token: clide.token },
+        INITIALIZE_TIMEOUT_MS,
+      );
     } catch (error) {
       client.close();
       await clide.stop();

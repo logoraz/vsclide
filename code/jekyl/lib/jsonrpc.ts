@@ -121,17 +121,41 @@ export class RpcClient {
     });
   }
 
-  /** Send a request and resolve with its result. */
-  request<T = unknown>(method: string, params?: unknown): Promise<T> {
+  /**
+   * Send a request and resolve with its result. With TIMEOUTMS, reject
+   * when no reply comes in that many milliseconds; without it, wait.
+   */
+  request<T = unknown>(
+    method: string,
+    params?: unknown,
+    timeoutMs?: number,
+  ): Promise<T> {
     return new Promise<T>((resolve, reject) => {
       if (this.socket.destroyed) {
         reject(new Error("connection closed"));
         return;
       }
       const id = this.nextId++;
+      const timer =
+        timeoutMs === undefined
+          ? undefined
+          : setTimeout(() => {
+              this.pending.delete(id);
+              reject(
+                new Error(
+                  `${method} did not answer within ${timeoutMs / 1000} s`,
+                ),
+              );
+            }, timeoutMs);
       this.pending.set(id, {
-        resolve: resolve as (value: unknown) => void,
-        reject,
+        resolve: (value) => {
+          clearTimeout(timer);
+          resolve(value as T);
+        },
+        reject: (error) => {
+          clearTimeout(timer);
+          reject(error);
+        },
       });
       this.socket.write(
         encodeMessage({ jsonrpc: "2.0", id, method, params }),

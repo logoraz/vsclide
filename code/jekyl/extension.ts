@@ -120,6 +120,7 @@ export function activate(context: vscode.ExtensionContext): void {
     context.extensionUri,
     ide,
     (replId, entry, value) => panel.inspectReplValue(replId, entry, value),
+    (line) => output.appendLine(line),
   );
   context.subscriptions.push(
     status,

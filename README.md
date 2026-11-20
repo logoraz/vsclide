@@ -20,6 +20,7 @@ A full-powered Common Lisp IDE for VS Code.
 - **Breakpoints:** the gutter's, on top of stickers
 - **Syntax highlighting:** its own grammar; your theme stays as it is
 - **Key bindings:** a VS Code style set and an SLY and Emacs set
+- **Linux and Windows:** the same extension and the same Lisp side on both
 
 
 ## How it works
@@ -35,13 +36,18 @@ You bring your own Lisp implementation. See
 [docs/architecture.md](docs/architecture.md) for the design.
 
 
-## Requirements
+## Dependencies
 
-- Linux
-- SBCL, with [ocicl](https://github.com/ocicl/ocicl) set up, and slynk
-  loadable by ASDF in your Lisp
+Direct dependencies:
+
+- [SBCL](https://www.sbcl.org/), the Lisp VSCLIDE runs
+- [ocicl](https://github.com/ocicl/ocicl), which fetches the Lisp
+  libraries, slynk included; set it up once with `ocicl setup`, which
+  loads it from your SBCL init file (`.sbclrc`)
 - Node.js and npm, to build the extension
 - VS Code or VSCodium
+
+VSCLIDE runs on Linux and on Windows.
 
 
 ## Install
@@ -84,17 +90,17 @@ first evaluation starts Lisp, or run `VSCLIDE: Connect`.
   [docs/keybindings.md](docs/keybindings.md).
 - Settings, all under `vsclide.`:
 
-  | Setting | Controls |
-  | --- | --- |
-  | `lisp.command` | the Lisp executable (default `sbcl`) |
-  | `keymap` | the key set: `auto`, `vscode` or `emacs` |
-  | `repl.*` | opening on connect, Sylvester's art, package sync |
-  | `completion.*` | the completion source, limit and documentation |
-  | `definitions.enabled` | go to definition |
-  | `references.*` | find all references, and which kinds it searches |
-  | `diagnostics.*` | compiler notes in the editor |
-  | `signatureHelp.*` | the lambda list popup |
-  | `stickers.autoRefresh` | fetching recordings after code runs |
+  | Setting                | Controls                                          |
+  | ---------------------- | ------------------------------------------------- |
+  | `lisp.command`         | the Lisp executable (default `sbcl`)              |
+  | `keymap`               | the key set: `auto`, `vscode` or `emacs`          |
+  | `repl.*`               | opening on connect, Sylvester's art, package sync |
+  | `completion.*`         | the completion source, limit and documentation    |
+  | `definitions.enabled`  | go to definition                                  |
+  | `references.*`         | find all references, and which kinds it searches  |
+  | `diagnostics.*`        | compiler notes in the editor                      |
+  | `signatureHelp.*`      | the lambda list popup                             |
+  | `stickers.autoRefresh` | fetching recordings after code runs               |
 
 VSCLIDE never changes your settings.
 

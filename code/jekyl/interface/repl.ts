@@ -1,5 +1,6 @@
 import * as vscode from "vscode";
 import { ReplPackage, needsPackageSync } from "../lib/package-sync";
+import { problemText } from "../lib/problem";
 import { Ide, IdeEvent } from "../base/ide";
 import { banner } from "../lib/sylvester";
 
@@ -51,6 +52,7 @@ export class ReplView implements vscode.WebviewViewProvider {
       entry: number,
       value: number,
     ) => Promise<void>,
+    private readonly log: (line: string) => void = () => undefined,
   ) {
     this.unsubscribe = ide.onEvent((event) => this.onEvent(event));
   }
@@ -125,7 +127,10 @@ export class ReplView implements vscode.WebviewViewProvider {
       await vscode.commands.executeCommand(`${VIEW_ID}.focus`, {
         preserveFocus: true,
       });
+      this.post({ type: "problem" });
       this.adopting = true;
+      // Connect first, so a start that fails fails once and is reported.
+      await this.ide.connect();
       const art = vscode.workspace
         .getConfiguration("vsclide")
         .get<boolean>("repl.sylvester", true);
@@ -133,7 +138,12 @@ export class ReplView implements vscode.WebviewViewProvider {
       const id = await this.ide.createRepl();
       this.adopt(id);
     } catch (error) {
-      this.post({ type: "notice", text: (error as Error).message });
+      this.log(`vsclide: could not start a REPL: ${(error as Error).message}`);
+      this.post(
+        this.repls.size === 0
+          ? { type: "problem", text: problemText(error) }
+          : { type: "notice", text: problemText(error) },
+      );
     } finally {
       this.adopting = false;
     }

@@ -20,6 +20,7 @@ type Incoming =
   | { type: "values"; replId: number; values: ReplValue[] }
   | { type: "aborted"; replId: number; message: string }
   | { type: "notice"; replId?: number; text: string }
+  | { type: "problem"; text?: string }
   | { type: "clear"; replId?: number };
 
 /** A value a REPL returned: what to show, and where slynk keeps it. */
@@ -49,6 +50,7 @@ const input = document.getElementById("input") as HTMLTextAreaElement;
 const promptLabel = document.getElementById("prompt") as HTMLElement;
 const interrupt = document.getElementById("interrupt") as HTMLButtonElement;
 const empty = document.getElementById("empty") as HTMLElement;
+const emptyText = empty.textContent ?? "";
 
 const repls = new Map<number, Repl>();
 let active: number | undefined;
@@ -256,6 +258,10 @@ window.addEventListener("message", (event: MessageEvent<Incoming>) => {
       targets(message.replId).forEach((repl) =>
         append(repl, "notice", message.text),
       );
+      break;
+    case "problem":
+      // Shown in place of "No mREPL open", for a start that failed.
+      empty.textContent = message.text ?? emptyText;
       break;
     case "clear":
       targets(message.replId).forEach((repl) => {

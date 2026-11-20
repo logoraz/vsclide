@@ -25,10 +25,6 @@
   ],
   "icon": "data/graphics/lisp-icon.png",
   "main": "./out/extension.js",
-  "activationEvents": [
-    "onLanguage:commonlisp",
-    "onView:vsclide.mrepl"
-  ],
   "contributes": {
     "languages": [
       {
