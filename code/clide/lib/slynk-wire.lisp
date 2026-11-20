@@ -257,6 +257,19 @@ WIRE-ERROR when it ends part way."
              (parse-integer text :radix 16))
         (wire-fail "bad length header ~s" text))))
 
+(defun text-octets (string external-format)
+  "Return the octets of STRING in EXTERNAL-FORMAT.  A line feed stays
+one octet on every platform; flexi-streams would write CRLF on Windows."
+  (string-to-octets string
+                    :external-format (list external-format :eol-style :lf)))
+
+(defun octets-text (octets external-format)
+  "Return the string that OCTETS encode in EXTERNAL-FORMAT.  CRLF stays
+two characters on every platform; flexi-streams would read it as LF on
+Windows."
+  (octets-to-string octets
+                    :external-format (list external-format :eol-style :lf)))
+
 (defun read-packet (stream)
   "Read one framed packet from binary STREAM and return its text.
 Return :EOF when the stream has ended."
@@ -266,17 +279,16 @@ Return :EOF when the stream has ended."
         (let ((body (read-exactly stream (parse-header header))))
           (when (eq body :eof)
             (wire-fail "stream ended before the message body"))
-          (handler-case (octets-to-string body :external-format :utf-8)
+          (handler-case (octets-text body :utf-8)
             (error () (wire-fail "message body is not UTF-8")))))))
 
 (defun write-packet (stream text)
   "Write TEXT to binary STREAM as one framed packet, then flush."
-  (let* ((body (string-to-octets text :external-format :utf-8))
+  (let* ((body (text-octets text :utf-8))
          (size (length body)))
     (when (> size +max-packet-size+)
       (wire-fail "message of ~d octets is too long" size))
-    (let ((header (string-to-octets (format nil "~6,'0x" size)
-                                    :external-format :latin-1)))
+    (let ((header (text-octets (format nil "~6,'0x" size) :latin-1)))
       (write-sequence header stream)
       (write-sequence body stream)
       (finish-output stream))))

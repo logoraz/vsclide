@@ -93,6 +93,17 @@ octet vector."
     (is (string= text (gethash "result"
                                (read-message (octets-stream octets)))))))
 
+(test frame-crlf-default
+  "A message frames the same where flexi-streams defaults to CRLF, as
+on Windows: the header ends in one CR LF CR LF and nothing doubles."
+  (let* ((flexi-streams:*default-eol-style* :crlf)
+         (text (format nil "a~%b"))
+         (octets (written-octets (make-response 1 text))))
+    (is (null (search #(13 13) octets)))
+    (is (search #(13 10 13 10) octets))
+    (is (string= text (gethash "result"
+                               (read-message (octets-stream octets)))))))
+
 (test read-eof
   "An empty stream returns :EOF."
   (is (eq :eof (read-message (octets-stream #())))))
@@ -219,6 +230,18 @@ octet vector."
                    (write-packet out text))))
     (is (string= (format nil "~6,'0x" (length (wire-octets text)))
                  (map 'string #'code-char (subseq octets 0 6))))
+    (is (string= text (read-packet (octets-stream octets))))))
+
+(test wire-packet-crlf-default
+  "A packet counts and carries a line feed as one octet where
+flexi-streams defaults to CRLF, as on Windows."
+  (let* ((flexi-streams:*default-eol-style* :crlf)
+         (text (format nil "(:write-string \"a~%b\")"))
+         (octets (with-output-to-sequence (out)
+                   (write-packet out text))))
+    (is (string= (format nil "~6,'0x" (length text))
+                 (map 'string #'code-char (subseq octets 0 6))))
+    (is (null (find 13 octets)))
     (is (string= text (read-packet (octets-stream octets))))))
 
 (test wire-packet-header-case
