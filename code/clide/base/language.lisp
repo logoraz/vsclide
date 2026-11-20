@@ -2,7 +2,8 @@
   (:use :cl)
   (:import-from :clide/lib/jsonrpc
                 #:make-object
-                #:raise)
+                #:raise
+                #:+invalid-params+)
   (:import-from :clide/lib/slynk-wire
                 #:sym)
   (:import-from :clide/base/slynk-client
@@ -43,11 +44,15 @@ arglists, documentation and definitions, for the ide methods."))
 ;;;   ide/definitions {name, package?}
 ;;;       {definitions: [{name, location}]}   location as in location.lisp
 ;;;       The image knows the definitions of what is loaded, no more.
-;;;   ide/xref {name, package?}
+;;;   ide/xref {name, package?, kinds?}
 ;;;       {references: [{name, kind, location}]}
-;;;       Who calls the function, who refers to the variable, and who
-;;;       expands the macro; kind is "calls", "references" or
-;;;       "macroexpands".  What is loaded is all the image knows.
+;;;       Who calls the function, who expands the macro, who binds,
+;;;       refers to or sets the variable, and which methods specialize
+;;;       the class; kind is "calls", "macroexpands", "binds",
+;;;       "references", "sets" or "specializes".  KINDS, an array of
+;;;       those names, narrows the search; without it all are searched,
+;;;       as SLY's sly-edit-uses does.  What is loaded is all the image
+;;;       knows.
 
 (defparameter *default-limit* 100
   "How many completions ide/complete returns when asked for no number.")
@@ -156,9 +161,37 @@ heading, or NIL when the symbol has no documentation or is unknown."
 
 ;;; Cross references
 
-(defparameter *xref-kinds* '(:calls :references :macroexpands)
-  "The slynk xref kinds ide/xref reports: callers, references to a
-variable and expansions of a macro.")
+(defparameter *xref-kinds*
+  '(:calls :macroexpands :binds :references :sets :specializes)
+  "The slynk xref kinds ide/xref can report, in the order SLY's
+sly-edit-uses searches them: callers, expansions of a macro, bindings,
+references and assignments of a variable, and methods that specialize
+a class.")
+
+(defun xref-kind (name)
+  "Return the xref kind that the string NAME spells, or raise
++INVALID-PARAMS+."
+  (or (and (stringp name)
+           (find name *xref-kinds*
+                 :key (lambda (kind) (string-downcase (symbol-name kind)))
+                 :test #'string=))
+      (raise +invalid-params+ (format nil "Unknown xref kind ~s." name))))
+
+(defun xref-kinds (params)
+  "Return the xref kinds to search for PARAMS, in the order of
+*XREF-KINDS*: those named in its kinds array, or all of them when
+there is none or it is empty.  Raise +INVALID-PARAMS+ when kinds is not
+an array of kind names."
+  (let ((names (and (hash-table-p params) (gethash "kinds" params))))
+    (cond ((null names) *xref-kinds*)
+          ((and (vectorp names) (not (stringp names)))
+           (if (zerop (length names))
+               *xref-kinds*
+               (let ((wanted (map 'list #'xref-kind names)))
+                 (remove-if-not (lambda (kind) (member kind wanted))
+                                *xref-kinds*))))
+          (t (raise +invalid-params+
+                    "kinds must be an array of strings.")))))
 
 (defun xref-object (kind xref)
   "Return the JSON object for XREF, slynk's (LABEL LOCATION), of KIND."
@@ -168,12 +201,13 @@ variable and expansions of a macro.")
                  "location" (location-object location))))
 
 (defun references (ide params)
-  "Handle ide/xref: return where a name is called, referred to or
-expanded."
+  "Handle ide/xref: return where a name is called, expanded, bound,
+referred to, set or specialized, of the kinds asked for."
   (let* ((name (required-string params "name"))
+         (kinds (xref-kinds params))
          (found (ask ide params
                      (list (sym "slynk:xrefs")
-                           (list (sym "quote") *xref-kinds*)
+                           (list (sym "quote") kinds)
                            name))))
     (make-object
      "references"

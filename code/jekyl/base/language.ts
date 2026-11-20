@@ -28,7 +28,7 @@ export interface Definition {
 export interface Reference {
   /** Who refers, such as "(DEFUN FOO)". */
   name: string;
-  /** What kind: "calls", "references" or "macroexpands". */
+  /** What kind: one of XREF_KINDS, such as "calls" or "binds". */
   kind: string;
   location: SourceLocation | null;
 }
@@ -98,6 +98,31 @@ export function parseDefinitions(value: unknown): Definition[] {
     name: text(definition.name),
     location: parseLocation(definition.location),
   }));
+}
+
+/**
+ * The xref kinds ide/xref can search, in the order of SLY's
+ * sly-edit-uses: callers, expansions of a macro, bindings, references
+ * and sets of a variable, and methods that specialize a class.
+ */
+export const XREF_KINDS: readonly string[] = [
+  "calls",
+  "macroexpands",
+  "binds",
+  "references",
+  "sets",
+  "specializes",
+];
+
+/**
+ * Return the xref kinds to ask for from VALUE, the vsclide.references.
+ * kinds setting: its known names, once each, in the order of
+ * XREF_KINDS. Anything else, or no known name, asks for every kind.
+ */
+export function xrefKinds(value: unknown): string[] {
+  const named = Array.isArray(value) ? value : [];
+  const wanted = XREF_KINDS.filter((kind) => named.includes(kind));
+  return wanted.length > 0 ? wanted : [...XREF_KINDS];
 }
 
 /** Return the references in VALUE, the reply to ide/xref. */

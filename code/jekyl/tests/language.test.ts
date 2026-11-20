@@ -1,4 +1,5 @@
 import { strict as assert } from "node:assert";
+import { readFileSync } from "node:fs";
 import { test } from "node:test";
 import { locationFile, parseLocation } from "../base/debugger";
 import {
@@ -9,7 +10,10 @@ import {
   parseDefinitions,
   summarize,
   tidyDocumentation,
+  XREF_KINDS,
+  xrefKinds,
 } from "../base/language";
+import { MANIFEST } from "./textmate";
 
 test("parseCompletions reads items and chunks", () => {
   const items = parseCompletions({
@@ -127,4 +131,30 @@ test("tidyDocumentation drops the arglist lines", () => {
     tidyDocumentation(text),
     "Function:\n\n Return the first.\n\nMore.",
   );
+});
+
+test("xrefKinds keeps the known kinds, once, in search order", () => {
+  assert.deepEqual(xrefKinds(["sets", "calls", "sets"]), ["calls", "sets"]);
+  assert.deepEqual(xrefKinds(["specializes", "binds"]), [
+    "binds",
+    "specializes",
+  ]);
+});
+
+test("xrefKinds drops unknown names", () => {
+  assert.deepEqual(xrefKinds(["calls", "locutus", 7, null]), ["calls"]);
+});
+
+test("xrefKinds asks for every kind when none is usable", () => {
+  for (const value of [undefined, null, [], ["locutus"], "calls", 3]) {
+    assert.deepEqual(xrefKinds(value), [...XREF_KINDS]);
+  }
+});
+
+test("the settings default names every kind in search order", () => {
+  const manifest = JSON.parse(readFileSync(MANIFEST, "utf8"));
+  const setting =
+    manifest.contributes.configuration.properties["vsclide.references.kinds"];
+  assert.deepEqual(setting.default, [...XREF_KINDS]);
+  assert.deepEqual(setting.items.enum, [...XREF_KINDS]);
 });

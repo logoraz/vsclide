@@ -4,15 +4,17 @@ import { SourceLocation, locationFile } from "../base/debugger";
 import { symbolAround } from "../lib/completion";
 import { packageAt } from "../lib/forms";
 import { locationOffset } from "../lib/source-location";
+import { xrefKinds } from "../base/language";
 
 /**
  * Takes Shift+F12, Find All References, to where a symbol is called,
- * referred to or macroexpanded, as far as the Lisp knows: what is
- * loaded into it, and no more. VS Code shows the list; there is no
- * panel of our own.
+ * macroexpanded, bound, referred to, set or specialized, as far as the
+ * Lisp knows: what is loaded into it, and no more. VS Code shows the
+ * list; there is no panel of our own.
  *
- * It follows vsclide.references.enabled, and does nothing when there
- * is no connection: it never starts a Lisp.
+ * It follows vsclide.references.enabled, searches the kinds in
+ * vsclide.references.kinds, and does nothing when there is no
+ * connection: it never starts a Lisp.
  */
 export class ReferenceProvider implements vscode.ReferenceProvider {
   constructor(private readonly ide: Ide) {}
@@ -21,10 +23,10 @@ export class ReferenceProvider implements vscode.ReferenceProvider {
     document: vscode.TextDocument,
     position: vscode.Position,
   ): Promise<vscode.Location[] | undefined> {
-    const enabled = vscode.workspace
-      .getConfiguration("vsclide.references")
-      .get<boolean>("enabled", true);
-    if (!enabled || !this.ide.connected) return undefined;
+    const settings = vscode.workspace.getConfiguration("vsclide.references");
+    if (!settings.get<boolean>("enabled", true) || !this.ide.connected) {
+      return undefined;
+    }
     const text = document.getText();
     const offset = document.offsetAt(position);
     const symbol = symbolAround(text, offset);
@@ -32,7 +34,11 @@ export class ReferenceProvider implements vscode.ReferenceProvider {
 
     let references;
     try {
-      references = await this.ide.xref(symbol.name, packageAt(text, offset));
+      references = await this.ide.xref(
+        symbol.name,
+        packageAt(text, offset),
+        xrefKinds(settings.get("kinds")),
+      );
     } catch {
       return undefined;
     }

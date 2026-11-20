@@ -1004,6 +1004,60 @@ with PAIRS added."
                                            (make-object
                                             "name" "locutus-nowhere")))))))))
 
+(defun compile-variable-uses (session)
+  "Compile a special variable with a binder, a setter and a reader."
+  (dolist (code '("(defvar *locutus-xv* 1)"
+                  "(defun locutus-binder () (let ((*locutus-xv* 2)) 0))"
+                  "(defun locutus-setter () (setf *locutus-xv* 3))"
+                  "(defun locutus-reader () *locutus-xv*)"))
+    (compile-ide session code :file "/tmp/locutus-xref-kinds.lisp")))
+
+(defun xref-kinds-found (session &rest params)
+  "Return the sorted kinds ide/xref reports for *locutus-xv*, with
+PARAMS, alternating names and values, added to the request."
+  (let ((request (make-object "name" "*locutus-xv*"
+                              "package" "COMMON-LISP-USER")))
+    (loop :for (key value) :on params :by #'cddr
+          :do (setf (gethash key request) value))
+    (sort (remove-duplicates
+           (map 'list (lambda (reference) (gethash "kind" reference))
+                (gethash "references"
+                         (result (rpc session "ide/xref" request))))
+           :test #'string=)
+          #'string<)))
+
+(test xref-searches-every-kind-by-default
+  "Without kinds, a variable's bindings, references and sets all show."
+  (with-ide (session slynk-port)
+    (connect-ide session slynk-port)
+    (compile-variable-uses session)
+    (is (equal '("binds" "references" "sets")
+               (xref-kinds-found session)))))
+
+(test xref-kinds-narrow-the-search
+  "Only the kinds asked for are reported."
+  (with-ide (session slynk-port)
+    (connect-ide session slynk-port)
+    (compile-variable-uses session)
+    (is (equal '("sets")
+               (xref-kinds-found session "kinds" (vector "sets"))))
+    (is (equal '("binds" "sets")
+               (xref-kinds-found session "kinds" (vector "sets" "binds"))))
+    (is (equal '("binds" "references" "sets")
+               (xref-kinds-found session "kinds" (vector))))))
+
+(test xref-rejects-a-bad-kind
+  "A kind that is not one, or kinds that is not an array, is invalid."
+  (with-ide (session slynk-port)
+    (connect-ide session slynk-port)
+    (is (= -32602 (error-code
+                   (rpc session "ide/xref"
+                        (make-object "name" "car"
+                                     "kinds" (vector "locutus"))))))
+    (is (= -32602 (error-code
+                   (rpc session "ide/xref"
+                        (make-object "name" "car" "kinds" "calls")))))))
+
 (test language-needs-a-connection
   "Language requests before connecting are not-connected errors."
   (with-ide (session slynk-port)

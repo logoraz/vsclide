@@ -214,9 +214,11 @@ vsclide/
     `multiple-value-bind`; the package is that of the nearest
     `in-package` above the cursor
   - Definitions are those of what the image has loaded, no more
-  - `ide/xref` asks slynk for who calls, who refers to and who
-    macroexpands a name; Find All References (Shift+F12) shows them,
-    with no panel of our own
+  - `ide/xref` asks slynk for who calls, macroexpands, binds, refers
+    to, sets or specializes a name, of the kinds in
+    `vsclide.references.kinds` (all six by default, as SLY's
+    `sly-edit-uses` searches); Find All References (Shift+F12) shows
+    them, with no panel of our own
   - `ide/compile` sends a string with its file and start offset; slynk
     compiles it as if from that place, so frames find their source and
     notes carry positions; the buffer is named after the file
@@ -240,7 +242,7 @@ vsclide/
     edits above them, dropped by edits on them, replaced on recompile
   - Positions count UTF-16 units in the editor and characters in Lisp
 - Settings: `vsclide.completion.{enabled,mode,limit,documentation}`,
-  `vsclide.definitions.enabled`, `vsclide.references.enabled`,
+  `vsclide.definitions.enabled`, `vsclide.references.{enabled,kinds}`,
   `vsclide.diagnostics.{enabled,minimumSeverity}`
 
 ## Signature help, stickers and breakpoints

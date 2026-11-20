@@ -251,7 +251,25 @@
         "vsclide.references.enabled": {
           "type": "boolean",
           "default": true,
-          "description": "Find All References (Shift+F12) from what the Lisp has loaded: callers, references and macroexpansions."
+          "description": "Find All References (Shift+F12) from what the Lisp has loaded, of the kinds in vsclide.references.kinds."
+        },
+        "vsclide.references.kinds": {
+          "type": "array",
+          "items": {
+            "type": "string",
+            "enum": ["calls", "macroexpands", "binds", "references", "sets", "specializes"],
+            "enumDescriptions": [
+              "Functions that call it.",
+              "Code that expands it, for a macro.",
+              "Code that binds it, for a special variable.",
+              "Code that reads it, for a variable.",
+              "Code that sets it, for a variable.",
+              "Methods that specialize on it, for a class."
+            ]
+          },
+          "uniqueItems": true,
+          "default": ["calls", "macroexpands", "binds", "references", "sets", "specializes"],
+          "description": "The kinds of reference Find All References searches, as SLY's sly-edit-uses does by default. An empty list searches them all."
         },
         "vsclide.repl.syncPackage": {
           "type": "boolean",

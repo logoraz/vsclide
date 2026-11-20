@@ -597,10 +597,18 @@ export class Ide {
    * Return where NAME is called, referred to or macroexpanded, in what
    * the image has loaded. Nothing when not connected.
    */
-  async xref(name: string, packageName?: string): Promise<Reference[]> {
+  async xref(
+    name: string,
+    packageName?: string,
+    kinds?: string[],
+  ): Promise<Reference[]> {
     if (!this.info) return [];
     return parseReferences(
-      await this.session.request("ide/xref", { name, package: packageName }),
+      await this.session.request("ide/xref", {
+        name,
+        package: packageName,
+        kinds,
+      }),
     );
   }
 

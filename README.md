@@ -91,7 +91,7 @@ first evaluation starts Lisp, or run `VSCLIDE: Connect`.
   | `repl.*` | opening on connect, Sylvester's art, package sync |
   | `completion.*` | the completion source, limit and documentation |
   | `definitions.enabled` | go to definition |
-  | `references.enabled` | find all references |
+  | `references.*` | find all references, and which kinds it searches |
   | `diagnostics.*` | compiler notes in the editor |
   | `signatureHelp.*` | the lambda list popup |
   | `stickers.autoRefresh` | fetching recordings after code runs |
