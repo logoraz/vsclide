@@ -71,8 +71,10 @@ All of these pass:
 
 ## Packaging
 
-`npm run package` builds the VSIX. The extension only starts clide from a
-checkout for now, so the VSIX is not usable on its own yet.
+`npm run package` builds the VSIX; install it with
+`codium --install-extension vsclide-*.vsix`. The extension runs
+`ocicl install` in its `code/clide` folder on first use, so ocicl must be
+set up on the machine (`vsclide.ocicl.command` names the executable).
 
 ## License
 

@@ -40,12 +40,18 @@ export function clideArgs(): string[] {
 /**
  * Arguments that load slynk, start its server on an ephemeral loopback
  * port that takes any number of connections, announce the port and
- * keep the process alive.
+ * keep the process alive. With SYSTEM, the path of a slynk system
+ * definition, that slynk is loaded, as the one clide is tested with,
+ * whatever the user's own systems offer.
  */
-export function slynkArgs(): string[] {
+export function slynkArgs(system?: string): string[] {
   const server = "(slynk:create-server :port 0 :dont-close t)";
+  const register = system
+    ? [`(asdf:load-asd ${JSON.stringify(system)})`]
+    : [];
   return evalArgs(
     REQUIRE_ASDF,
+    ...register,
     '(asdf:load-system "slynk")',
     ANNOUNCE.replace("PORT", server),
     "(loop (sleep 3600))",
@@ -53,9 +59,8 @@ export function slynkArgs(): string[] {
 }
 
 /**
- * Return the launch of clide from this checkout, run from code/clide
- * so ocicl and ASDF resolve systems. Only valid while the extension
- * runs from a checkout (F5).
+ * Return the launch of clide from the extension, run from code/clide
+ * so ocicl and ASDF resolve systems.
  */
 export function clideLaunch(context: LaunchContext): LaunchOptions {
   return {
@@ -69,17 +74,21 @@ export function clideLaunch(context: LaunchContext): LaunchOptions {
 /**
  * Return the launch of the slynk server for the user's code: run from
  * the workspace folder so the user's systems are found, else from
- * code/clide.
+ * code/clide. SYSTEM is the slynk to load, if one is installed.
  */
-export function slynkLaunch(context: LaunchContext): LaunchOptions {
+export function slynkLaunch(
+  context: LaunchContext,
+  system?: string,
+): LaunchOptions {
   return {
     command: context.lispCommand,
-    args: slynkArgs(),
+    args: slynkArgs(system),
     cwd: context.workspacePath ?? clideDirectory(context),
     log: context.log,
   };
 }
 
-function clideDirectory(context: LaunchContext): string {
+/** Return the clide directory of the extension. */
+export function clideDirectory(context: LaunchContext): string {
   return path.join(context.extensionPath, "code", "clide");
 }

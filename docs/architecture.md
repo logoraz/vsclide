@@ -71,8 +71,12 @@ vsclide/
 - clide runs from `code/clide`, so ocicl and ASDF resolve its systems;
   the slynk server runs from the workspace folder, so the user's
   systems are found
-- Only the development launch exists: jekyl starts clide from the
-  checkout of the extension (F5)
+- clide starts from `code/clide` of the extension, a checkout under F5
+  or the installed folder; an installed extension first runs
+  `ocicl install` there (`base/setup.ts`), once per `ocicl.csv`, with
+  a progress notice
+- The slynk server loads the slynk pinned in `ocicl.csv` when it is
+  installed, so clide and slynk match whatever the user's systems offer
 - Implementation-specific code is guarded with reader conditionals;
   `ansi-color.lisp` checks for a terminal with `sb-unix:unix-isatty`
 
@@ -338,8 +342,9 @@ vsclide/
 - `.vscodeignore` excludes tests, docs, `code/jekyl`, `.vscode`,
   `esbuild.js`, `package-lock.json`, `node_modules/**` and
   `**/tsconfig.json`
-- Without the first-launch build (Future work) the VSIX is not yet
-  usable outside a checkout
+- The VSIX carries `ocicl.csv`, not the dependencies; the first launch
+  runs `ocicl install`, which needs ocicl on the `PATH` or at
+  `vsclide.ocicl.command`
 
 ## Future work
 
@@ -399,14 +404,12 @@ far:
 
 ### Later
 
-- First-launch build: on activation, build clide for the implementation
-  if no build matches its version, in `context.globalStorageUri`, and
-  start from a saved core, falling back to the ASDF FASL cache
+- Faster start: build clide for the implementation into
+  `context.globalStorageUri` and start from a saved core, falling back
+  to the ASDF FASL cache
   - Cache key: clide version plus implementation and its version
-  - Progress through `vscode.window.withProgress`, full output in an
-    output channel, a lock against concurrent windows, and errors that
-    name the failing step
-  - Dependencies fetched with ocicl by default, a setting to override
+  - A lock against concurrent windows, and errors that name the
+    failing step
 - Hermetic launch: skip the user's init files unless a setting opts in
 - A terminal profile for a plain REPL
 - One universal VSIX, published to Open VSX and the Microsoft

@@ -2,8 +2,8 @@
   "name": "vsclide",
   "displayName": ":VSCLIDE",
   "description": "A full-powered Common Lisp IDE for VS Code.",
-  "version": "0.0.8",
-  "publisher": "locutus",
+  "version": "0.0.9",
+  "publisher": "logoraz",
   "license": "MIT",
   "repository": {
     "type": "git",
@@ -23,6 +23,7 @@
     "slynk",
     "repl"
   ],
+  "icon": "data/graphics/lisp-icon.png",
   "main": "./out/extension.js",
   "activationEvents": [
     "onLanguage:commonlisp",
@@ -200,6 +201,11 @@
           "type": "string",
           "default": "sbcl",
           "description": "Lisp implementation executable that runs clide and slynk."
+        },
+        "vsclide.ocicl.command": {
+          "type": "string",
+          "default": "ocicl",
+          "description": "ocicl executable that installs the Lisp dependencies of clide, once, on first use."
         },
         "vsclide.repl.openOnConnect": {
           "type": "boolean",

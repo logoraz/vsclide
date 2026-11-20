@@ -11,8 +11,13 @@ export class Session {
   private readonly notificationListeners = new Set<NotificationListener>();
   private readonly exitListeners = new Set<() => void>();
 
-  /** LAUNCH is called each time clide has to be started. */
-  constructor(private readonly launch: () => LaunchOptions) {}
+  /**
+   * LAUNCH is called each time clide has to be started; it may first
+   * have to prepare, as by installing dependencies.
+   */
+  constructor(
+    private readonly launch: () => LaunchOptions | Promise<LaunchOptions>,
+  ) {}
 
   /** Return the connected client, starting clide if needed. */
   ensure(): Promise<RpcClient> {
@@ -58,7 +63,7 @@ export class Session {
   }
 
   private async start(): Promise<RpcClient> {
-    const clide = await startClide(this.launch());
+    const clide = await startClide(await this.launch());
     this.current = clide;
     void clide.exited.then(() => {
       if (this.current === clide) {

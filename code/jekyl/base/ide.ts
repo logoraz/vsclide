@@ -196,7 +196,7 @@ export class Ide {
    */
   constructor(
     private readonly session: Session,
-    private readonly slynkLaunch: () => LaunchOptions,
+    private readonly slynkLaunch: () => LaunchOptions | Promise<LaunchOptions>,
   ) {
     session.onNotification((method, params) =>
       this.onNotification(method, params),
@@ -756,7 +756,7 @@ export class Ide {
   }
 
   private async startSlynkProcess(): Promise<LispProcess> {
-    const slynk = await startSlynk(this.slynkLaunch());
+    const slynk = await startSlynk(await this.slynkLaunch());
     this.slynk = slynk;
     void slynk.exited.then(() => {
       if (this.slynk === slynk) {

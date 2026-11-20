@@ -1,6 +1,12 @@
 import * as vscode from "vscode";
 import { Ide } from "./base/ide";
-import { LaunchContext, clideLaunch, slynkLaunch } from "./base/launch";
+import {
+  LaunchContext,
+  clideDirectory,
+  clideLaunch,
+  slynkLaunch,
+} from "./base/launch";
+import { findSlynk, installDependencies, needsInstall } from "./base/setup";
 import { Session } from "./base/session";
 import { registerCommands } from "./interface/commands";
 import { CompletionProvider } from "./interface/completion";
@@ -39,10 +45,52 @@ function launchContext(
 }
 
 /**
+ * Return a function that makes sure the Lisp dependencies of clide are
+ * installed, once: a development checkout has its own, so only an
+ * installed extension runs ocicl, with a progress notice. A failed
+ * install is tried again the next time.
+ */
+function dependencies(
+  context: vscode.ExtensionContext,
+  output: vscode.OutputChannel,
+): () => Promise<void> {
+  let ready: Promise<void> | undefined;
+  const install = async (): Promise<void> => {
+    const directory = clideDirectory(launchContext(context, output));
+    if (!(await needsInstall(directory))) return;
+    await Promise.resolve(
+      vscode.window.withProgress(
+        {
+          location: vscode.ProgressLocation.Notification,
+          title: "VSCLIDE: installing Lisp dependencies with ocicl",
+        },
+        async () => {
+          await installDependencies({
+            directory,
+            command: vscode.workspace
+              .getConfiguration("vsclide")
+              .get<string>("ocicl.command", "ocicl"),
+            log: (line) => output.appendLine(line),
+          });
+        },
+      ),
+    );
+  };
+  return () => {
+    if (context.extensionMode === vscode.ExtensionMode.Development) {
+      return Promise.resolve();
+    }
+    ready ??= install().catch((error: unknown) => {
+      ready = undefined;
+      throw error;
+    });
+    return ready;
+  };
+}
+
+/**
  * Extension entry point; called by VS Code on first activation
  * (see activationEvents in package.json).
- *
- * Only the development launch of clide, from a checkout, exists so far.
  *
  * @param context Extension context; owns subscriptions and storage.
  */
@@ -50,13 +98,16 @@ export function activate(context: vscode.ExtensionContext): void {
   const output = vscode.window.createOutputChannel("VSCLIDE");
   context.subscriptions.push(output);
 
-  const session = new Session(() => {
-    if (context.extensionMode !== vscode.ExtensionMode.Development) {
-      throw new Error("only the development launch is implemented");
-    }
+  const prepare = dependencies(context, output);
+  const session = new Session(async () => {
+    await prepare();
     return clideLaunch(launchContext(context, output));
   });
-  ide = new Ide(session, () => slynkLaunch(launchContext(context, output)));
+  ide = new Ide(session, async () => {
+    await prepare();
+    const launch = launchContext(context, output);
+    return slynkLaunch(launch, await findSlynk(clideDirectory(launch)));
+  });
 
   const status = new Status(ide);
   const results = new Results(output);

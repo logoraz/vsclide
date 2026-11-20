@@ -19,16 +19,13 @@
                 :depends-on ("lib")
                 :components ((:file "server")
                              (:file "slynk-client")
-                             (:file "ide" :depends-on ("server" "slynk-client"))
-                             (:file "location" :depends-on ("ide"))
-                             (:file "stickers"
-                              :depends-on ("ide" "compiler" "inspector"))
-                             (:file "debugger"
-                              :depends-on ("ide" "location" "stickers"))
+                             (:file "ide"       :depends-on ("server" "slynk-client"))
+                             (:file "location"  :depends-on ("ide"))
+                             (:file "stickers"  :depends-on ("ide" "compiler" "inspector"))
+                             (:file "debugger"  :depends-on ("ide" "location" "stickers"))
                              (:file "inspector" :depends-on ("ide"))
-                             (:file "language" :depends-on ("ide" "location"))
-                             (:file "compiler"
-                              :depends-on ("ide" "location"))))
+                             (:file "language"  :depends-on ("ide" "location"))
+                             (:file "compiler"  :depends-on ("ide" "location"))))
                (:module "interface"
                 :pathname "./"
                 :depends-on ("lib" "base")

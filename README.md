@@ -2,8 +2,8 @@
 
 A full-powered Common Lisp IDE for VS Code.
 
-> **Status:** early development, version 0.0.7. It runs from a checkout
-> in an Extension Development Host; there is no marketplace release yet.
+> **Status:** early development, version 0.0.9. Install it from a VSIX
+> you build yourself (below); there is no marketplace release yet.
 
 
 ## Features
@@ -44,9 +44,24 @@ You bring your own Lisp implementation. See
 - VS Code or VSCodium
 
 
+## Install
+
+Build a VSIX and install it; no marketplace release exists yet:
+
+```sh
+npm install
+npm run package
+codium --install-extension vsclide-*.vsix   # or: code
+```
+
+The first time Lisp is needed, the extension runs `ocicl install` in
+its own `code/clide` folder, which fetches the pinned dependencies,
+slynk included; set `vsclide.ocicl.command` if `ocicl` is not on your
+`PATH`. It runs again only when the pins change.
+
 ## Quick start
 
-From a checkout, until a release exists:
+From a checkout, for development:
 
 ```sh
 npm install
@@ -69,17 +84,17 @@ first evaluation starts Lisp, or run `VSCLIDE: Connect`.
   [docs/keybindings.md](docs/keybindings.md).
 - Settings, all under `vsclide.`:
 
-  | Setting                | Controls                                          |
-  |------------------------|---------------------------------------------------|
-  | `lisp.command`         | the Lisp executable (default `sbcl`)              |
-  | `keymap`               | the key set: `auto`, `vscode` or `emacs`          |
-  | `repl.*`               | opening on connect, Sylvester's art, package sync |
-  | `completion.*`         | the completion source, limit and documentation    |
-  | `definitions.enabled`  | go to definition                                  |
-  | `references.enabled`   | find all references                               |
-  | `diagnostics.*`        | compiler notes in the editor                      |
-  | `signatureHelp.*`      | the lambda list popup                             |
-  | `stickers.autoRefresh` | fetching recordings after code runs               |
+  | Setting | Controls |
+  | --- | --- |
+  | `lisp.command` | the Lisp executable (default `sbcl`) |
+  | `keymap` | the key set: `auto`, `vscode` or `emacs` |
+  | `repl.*` | opening on connect, Sylvester's art, package sync |
+  | `completion.*` | the completion source, limit and documentation |
+  | `definitions.enabled` | go to definition |
+  | `references.enabled` | find all references |
+  | `diagnostics.*` | compiler notes in the editor |
+  | `signatureHelp.*` | the lambda list popup |
+  | `stickers.autoRefresh` | fetching recordings after code runs |
 
 VSCLIDE never changes your settings.
 
@@ -111,6 +126,6 @@ VSCLIDE never changes your settings.
 ↳ [LICENSE](LICENSE)
 
 <p align="center">
-  <img src="data/graphics/lisp-icon-sm.svg"
+  <img src="data/graphics/lisp-icon.png"
        height="150" vspace="15" align="absmiddle" />
 </p>
