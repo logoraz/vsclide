@@ -1,5 +1,8 @@
 {
     "editor.detectIndentation": false,
     "editor.tabSize": 2,
-    "git.allowForcePush": true
+    "git.allowForcePush": true,
+    "[commonlisp]": {
+      // "editor.stickyScroll.enabled": false
+    }
 }

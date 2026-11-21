@@ -7,12 +7,12 @@
 
 /** Words of encouragement; each replaces @@@@ in a piece of art. */
 export const WORDS_OF_ENCOURAGEMENT: readonly string[] = [
-  "Sufferin' succotash, a fresh REPL!",
-  "The image is up and the parens are balanced.",
-  "Evaluate early, evaluate often.",
-  "A fresh image awaits your forms.",
-  "Time to bring some code to life.",
-  "Thufferin' thuccotash, let's cons something!",
+  "Make it so: a fresh REPL awaits.",
+  "Resistance is futile, and so are unbalanced parens.",
+  "Engage! Evaluate early, evaluate often.",
+  "Tea, Earl Grey, hot, and a fresh image.",
+  "Energy conserved, parens balanced.",
+  "Entropy always wins, but not before this evaluates.",
 ];
 
 /** Return a random element of ITEMS using RANDOM, a function in [0, 1). */

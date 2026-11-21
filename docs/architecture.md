@@ -422,6 +422,27 @@ In this order.
   already carries its color, so the maintainer's palette applies as it
   does now and the user's theme, background and own customizations are
   untouched
+- Three readers answer the same question, "what is in this text", and
+  the best one available wins: Slynk, then Eclector, then TypeScript
+  - One interface: `scan(text)` returns spans and forms; the editor never
+    knows which reader answered. The TypeScript scanners today
+    (`lib/indent-text.ts`, `lib/highlight.ts`) are the last of the three
+    and stay as the fallback, so nothing needs a Lisp to work
+  - Eclector (in clide, no image needed): structure and exact source
+    ranges from its parse-result protocol, and skipped input for `#+`
+    and `#-`; symbols stay tokens, never interned, with `*read-eval*`
+    nil and unknown packages tolerated
+  - Slynk, when connected, takes precedence over both: it knows the
+    image, not the text, so it supplies the facts (macro or not,
+    package resolution, `*features*`, indentation specs) and its answer
+    replaces a text reader's wherever they disagree; the text readers
+    supply only what the image cannot, the structure
+  - Per document version: requests are keyed by version and debounced;
+    the TypeScript result shows at once and the better one replaces it
+    when it arrives; any error or timeout keeps the layer below
+  - Differential tests: run the TypeScript and Eclector readers over a
+    corpus of Lisp files and compare spans, so the fallback does not
+    drift
 - Once the tokens cover what the grammar scopes, remove the static
   TextMate grammar and its tests; the language contribution and
   `language-configuration.json` stay

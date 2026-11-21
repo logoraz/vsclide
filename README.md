@@ -5,6 +5,15 @@ A full-powered Common Lisp IDE for VS Code.
 > **Status:** early development, version 0.1.0. Install it from a VSIX
 > you build yourself (below); there is no marketplace release yet.
 
+<p align="center">
+  <img src="docs/images/screen-sylvester.png"
+       width="85%" vspace="15" align="absmiddle" />
+</p>
+
+<p align="center">
+  <img src="docs/images/screen-sticker-break.png"
+       width="85%" vspace="15" align="absmiddle" />
+</p>
 
 ## Features
 
