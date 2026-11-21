@@ -13,6 +13,9 @@ export const WORDS_OF_ENCOURAGEMENT: readonly string[] = [
   "Tea, Earl Grey, hot, and a fresh image.",
   "Energy conserved, parens balanced.",
   "Entropy always wins, but not before this evaluates.",
+  "Set a course for new forms, warp factor nine.",
+  "Even a cons cell obeys Δx·Δp ≥ ħ/2.",
+  "Let there be Light!",
 ];
 
 /** Return a random element of ITEMS using RANDOM, a function in [0, 1). */

@@ -81,6 +81,18 @@ export class ReplView implements vscode.WebviewViewProvider {
     if (this.repls.size === 0) await this.create();
   }
 
+  /**
+   * Hide the panel when the mREPL is showing; otherwise open it, as the
+   * terminal's toggle does.
+   */
+  async toggle(): Promise<void> {
+    if (this.view?.visible) {
+      await vscode.commands.executeCommand("workbench.action.closePanel");
+    } else {
+      await this.open();
+    }
+  }
+
   /** Open a new REPL and make it the active tab. */
   create(): Promise<void> {
     // One creation at a time: a REPL's first events can arrive before

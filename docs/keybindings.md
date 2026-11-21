@@ -45,6 +45,10 @@ files (as Calva does in Clojure).
 | Open mREPL         | `Ctrl+Alt+C R` | `C-c C-z` |
 | Inspect expression | `Ctrl+Alt+C I` | `C-c I`   |
 
+`Ctrl+Alt+M` toggles the mREPL in both sets and from anywhere, like the
+terminal's toggle: it hides the panel when the mREPL is showing and
+opens it otherwise.
+
 ## Completion and signature help
 
 | Command            | VS Code                       | Emacs        |

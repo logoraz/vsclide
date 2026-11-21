@@ -22,7 +22,11 @@ function keymap(name: string): Binding[] {
 }
 
 /** Editing keys that every key map shares, so they name no key map. */
-const SHARED = new Set(["vsclide.indent", "vsclide.newlineAndIndent"]);
+const SHARED = new Set([
+  "vsclide.indent",
+  "vsclide.newlineAndIndent",
+  "vsclide.toggleRepl",
+]);
 
 test("every binding belongs to exactly one key map, or is shared", () => {
   for (const binding of bindings) {

@@ -346,6 +346,9 @@ export function registerCommands(
       }),
     ),
     register("openRepl", () => guarded(context, () => context.repl.open())),
+    register("toggleRepl", () =>
+      guarded(context, () => context.repl.toggle()),
+    ),
     register("newRepl", () => guarded(context, () => context.repl.create())),
     register("closeRepl", () =>
       guarded(context, () => context.repl.closeActive()),

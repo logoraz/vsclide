@@ -2,7 +2,7 @@
   "name": "vsclide",
   "displayName": ":VSCLIDE",
   "description": "A full-powered Common Lisp IDE for VS Code.",
-  "version": "0.1.0",
+  "version": "0.1.1",
   "publisher": "logoraz",
   "license": "MIT",
   "repository": {
@@ -94,6 +94,10 @@
       {
         "command": "vsclide.openRepl",
         "title": "VSCLIDE: Open mREPL"
+      },
+      {
+        "command": "vsclide.toggleRepl",
+        "title": "VSCLIDE: Toggle mREPL"
       },
       {
         "command": "vsclide.newRepl",
@@ -338,6 +342,11 @@
       }
     },
     "keybindings": [
+      {
+        "command": "vsclide.toggleRepl",
+        "key": "ctrl+alt+m",
+        "when": "true"
+      },
       {
         "command": "vsclide.indent",
         "key": "tab",
