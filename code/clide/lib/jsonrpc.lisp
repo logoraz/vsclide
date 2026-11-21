@@ -77,13 +77,13 @@
 
 ;;; Framing
 
-(defun text-octets (string external-format)
+(defun text->octets (string external-format)
   "Return the octets of STRING in EXTERNAL-FORMAT.  A line feed stays
 one octet on every platform; flexi-streams would write CRLF on Windows."
   (string-to-octets string
                     :external-format (list external-format :eol-style :lf)))
 
-(defun octets-text (octets external-format)
+(defun octets->text (octets external-format)
   "Return the string that OCTETS encode in EXTERNAL-FORMAT.  CRLF stays
 two characters on every platform; flexi-streams would read it as LF on
 Windows."
@@ -107,7 +107,7 @@ Return :EOF when the stream ends before the first byte of the line."
                                 (= (aref bytes (1- (length bytes))) 13))
                        (vector-pop bytes))
                      (return
-                       (octets-text
+                       (octets->text
                         (coerce bytes '(simple-array (unsigned-byte 8) (*)))
                         :latin-1)))
                     ((>= (length bytes) +max-header-size+)
@@ -161,7 +161,7 @@ error when the block ends without a Content-Length."
 
 (defun decode-body (octets)
   "Return the JSON value encoded in the UTF-8 octets OCTETS."
-  (handler-case (parse (octets-text octets :utf-8))
+  (handler-case (parse (octets->text octets :utf-8))
     (error ()
       (raise +parse-error+ "Invalid JSON."))))
 
@@ -177,9 +177,9 @@ JSONRPC-ERROR with +PARSE-ERROR+ on bad headers or bad JSON."
 (defun write-message (stream message)
   "Write MESSAGE to binary STREAM with a Content-Length header, then
 flush the stream."
-  (let* ((body (text-octets (stringify message) :utf-8))
+  (let* ((body (text->octets (stringify message) :utf-8))
          (crlf (format nil "~c~c" #\Return #\Newline))
-         (header (text-octets
+         (header (text->octets
                   (format nil "Content-Length: ~d~a~a"
                           (length body) crlf crlf)
                   :latin-1)))
