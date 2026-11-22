@@ -21,6 +21,8 @@
                 #:jsonrpc-error-code
                 #:make-notification
                 #:+parse-error+)
+  (:import-from :clide/lib/parent
+                #:wait-for-parent-exit)
   (:import-from :clide/lib/slynk-wire
                 #:wire-error
                 #:sym
@@ -273,3 +275,8 @@ flexi-streams defaults to CRLF, as on Windows."
     (setf octets (with-output-to-sequence (out)
                    (write-wire-message out form)))
     (is (equal form (read-wire-message (octets-stream octets))))))
+
+(test parent-exit-is-the-end-of-input
+  "Waiting returns once the input ends, whatever was written first."
+  (is (null (wait-for-parent-exit (make-string-input-stream ""))))
+  (is (null (wait-for-parent-exit (make-string-input-stream "abc")))))

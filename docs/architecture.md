@@ -33,7 +33,7 @@ vsclide/
 │   │   ├── base/             server, slynk-client, ide, location,
 │   │   │                     stickers, debugger, inspector, language,
 │   │   │                     compiler
-│   │   ├── lib/              ansi-color, jsonrpc, slynk-wire
+│   │   ├── lib/              ansi-color, jsonrpc, parent, slynk-wire
 │   │   └── tests/
 │   └── jekyl/                TypeScript side (extension host)
 │       ├── tsconfig.json     type-check only (noEmit)
@@ -80,6 +80,17 @@ vsclide/
   a progress notice
 - The slynk server loads the slynk pinned in `ocicl.csv` when it is
   installed, so clide and slynk match whatever the user's systems offer
+- Both processes end with the extension, however it ends
+  - jekyl starts them with standard input as a pipe it holds open and
+    never writes to; when the extension host exits, even when killed,
+    the operating system closes the pipe
+  - clide waits on that input with `wait-for-parent-exit`
+    (`lib/parent.lisp`) and quits at the end of file; the slynk server
+    does the same in its launch form (`base/launch.ts`)
+  - No process id or platform call is involved, so it works the same on
+    every platform
+  - Only a Lisp that VSCLIDE started is watched; an attached server is
+    never touched
 - Implementation-specific code is guarded with reader conditionals;
   `ansi-color.lisp` checks for a terminal with `sb-unix:unix-isatty`
 

@@ -65,7 +65,9 @@ export function startLisp(
   const child = spawn(options.command, options.args, {
     cwd: options.cwd,
     env: { ...process.env, ...extra },
-    stdio: ["ignore", "pipe", "pipe"],
+    // Standard input stays open and unused: when this process ends, the
+    // Lisp reads the end of file and exits, on every platform.
+    stdio: ["pipe", "pipe", "pipe"],
   });
 
   const exited = new Promise<number | null>((resolve) => {

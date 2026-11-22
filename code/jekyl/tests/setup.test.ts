@@ -90,3 +90,9 @@ test("slynk launches with the pinned system when there is one", () => {
   assert.ok(asd >= 0 && asd < load);
   assert.ok(pinned[asd].includes('"/x/clide/ocicl/sly-1/slynk/slynk.asd"'));
 });
+
+test("slynk exits when its standard input ends", () => {
+  const forms = slynkArgs().filter((arg) => arg.includes("read-char"));
+  assert.equal(forms.length, 1);
+  assert.ok(forms[0].includes("sb-ext:exit"));
+});

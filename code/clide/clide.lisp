@@ -1,5 +1,7 @@
 (defpackage :clide
   (:use :cl)
+  (:import-from :clide/lib/parent
+                #:wait-for-parent-exit)
   (:import-from :clide/base/server
                 #:make-server
                 #:register-method
@@ -50,7 +52,8 @@ Standard output is reserved for the port announcement."
 
 (defun main ()
   "Read CLIDE_TOKEN, start the server on an ephemeral loopback port,
-print one JSON line with the port to stdout, then block."
+print one JSON line with the port to stdout, then block until the
+extension that started it is gone."
   (let ((token (uiop:getenv "CLIDE_TOKEN")))
     (when (or (null token) (zerop (length token)))
       (format *error-output* "clide: CLIDE_TOKEN is not set.~%")
@@ -61,4 +64,6 @@ print one JSON line with the port to stdout, then block."
         (fresh-line)
         (format t "{\"port\":~d}~%" port)
         (finish-output)
-        (loop (sleep 3600))))))
+        (wait-for-parent-exit)
+        (log-to-stderr "parent is gone, exiting")
+        (uiop:quit 0)))))

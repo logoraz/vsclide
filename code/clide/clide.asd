@@ -13,7 +13,8 @@
                 :pathname "lib"
                 :components ((:file "ansi-color")
                              (:file "jsonrpc")
-                             (:file "slynk-wire")))
+                             (:file "slynk-wire")
+                             (:file "parent")))
                (:module "base"
                 :pathname "base"
                 :depends-on ("lib")

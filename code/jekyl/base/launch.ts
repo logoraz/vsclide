@@ -23,6 +23,15 @@ const REQUIRE_ASDF = "(require :asdf)";
 const ANNOUNCE =
   '(progn (fresh-line) (format t "{\\"port\\":~d}~%" PORT) (finish-output))';
 
+/**
+ * Block until standard input ends, then exit. The extension holds it
+ * open as a pipe, so it ends when the extension is gone, and a Lisp
+ * that outlives VS Code would otherwise run on, orphaned.
+ */
+const WATCH_PARENT =
+  "(loop (unless (read-char *standard-input* nil nil) " +
+  "(sb-ext:exit :code 0 :abort t)))";
+
 /** The arguments that run each --eval form in order, quietly. */
 function evalArgs(...forms: string[]): string[] {
   return [
@@ -40,9 +49,9 @@ export function clideArgs(): string[] {
 /**
  * Arguments that load slynk, start its server on an ephemeral loopback
  * port that takes any number of connections, announce the port and
- * keep the process alive. With SYSTEM, the path of a slynk system
- * definition, that slynk is loaded, as the one clide is tested with,
- * whatever the user's own systems offer.
+ * keep the process alive until its parent is gone. With SYSTEM, the
+ * path of a slynk system definition, that slynk is loaded, as the one
+ * clide is tested with, whatever the user's own systems offer.
  */
 export function slynkArgs(system?: string): string[] {
   const server = "(slynk:create-server :port 0 :dont-close t)";
@@ -54,7 +63,7 @@ export function slynkArgs(system?: string): string[] {
     ...register,
     '(asdf:load-system "slynk")',
     ANNOUNCE.replace("PORT", server),
-    "(loop (sleep 3600))",
+    WATCH_PARENT,
   );
 }
 
