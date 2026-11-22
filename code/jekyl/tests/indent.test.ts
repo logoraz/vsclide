@@ -259,6 +259,7 @@ test("malformed rules are dropped", () => {
 
 test("clide's indentation notification becomes an event", () => {
   const event = parseNotification("ide/indentation", {
+    connectionId: 2,
     rules: [
       {
         name: "with-lock-held",
@@ -270,6 +271,7 @@ test("clide's indentation notification becomes an event", () => {
   });
   assert.deepEqual(event, {
     type: "indentation",
+    connectionId: 2,
     rules: [
       {
         name: "with-lock-held",
@@ -305,4 +307,20 @@ test("a blank line is placed when asked, as after Enter", () => {
     { line: 1, column: 0 },
   ]);
   assert.deepEqual(indentRegion("(if test\n  ", 1, 1, rules), []);
+});
+
+test("each connection keeps its own rules", () => {
+  const rules = new IndentRules();
+  const rule = { name: "with-locutus", spec: 1, packages: [] };
+  rules.update([rule], 1);
+  assert.equal(rules.hasLive("with-locutus"), false);
+  rules.select(1);
+  assert.equal(rules.hasLive("with-locutus"), true);
+  rules.select(2);
+  assert.equal(rules.hasLive("with-locutus"), false);
+  rules.select(undefined);
+  assert.equal(rules.hasLive("with-locutus"), false);
+  rules.clear(1);
+  rules.select(1);
+  assert.equal(rules.hasLive("with-locutus"), false);
 });

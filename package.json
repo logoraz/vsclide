@@ -56,8 +56,16 @@
         "title": "VSCLIDE: Connect"
       },
       {
+        "command": "vsclide.connectToSlynk",
+        "title": "VSCLIDE: Connect to Running Slynk"
+      },
+      {
+        "command": "vsclide.switchConnection",
+        "title": "VSCLIDE: Switch Connection"
+      },
+      {
         "command": "vsclide.disconnect",
-        "title": "VSCLIDE: Disconnect and Stop Lisp"
+        "title": "VSCLIDE: Disconnect"
       },
       {
         "command": "vsclide.restart",

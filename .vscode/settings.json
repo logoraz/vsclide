@@ -3,6 +3,6 @@
     "editor.tabSize": 2,
     "git.allowForcePush": true,
     "[commonlisp]": {
-      // "editor.stickyScroll.enabled": false
+      "editor.stickyScroll.enabled": false
     }
 }

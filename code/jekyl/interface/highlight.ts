@@ -59,17 +59,20 @@ export class Highlighting implements vscode.DocumentSemanticTokensProvider {
       new vscode.Disposable(
         this.ide.onEvent((event) => {
           if (event.type === "connected") {
-            this.features.clear();
-            if (event.info.features) this.features.set(event.info.features);
-            this.refresh();
+            this.images.set(event.connectionId, event.info.features ?? []);
           } else if (event.type === "features") {
-            this.features.set(event.features);
-            this.refresh();
+            this.images.set(event.connectionId, event.features);
           } else if (event.type === "disconnected") {
-            this.features.clear();
-            this.refresh();
-          } else if (event.type === "indentation") {
-            this.refresh();
+            this.images.delete(event.connectionId);
+          }
+          if (
+            event.type === "connected" ||
+            event.type === "features" ||
+            event.type === "disconnected" ||
+            event.type === "indentation" ||
+            event.type === "active"
+          ) {
+            this.follow();
           }
         }),
       ),
@@ -79,6 +82,21 @@ export class Highlighting implements vscode.DocumentSemanticTokensProvider {
         }
       }),
     ];
+  }
+
+  /** The features each connection's image reported, by connection id. */
+  private readonly images = new Map<number, string[]>();
+
+  /**
+   * Take the features of the active connection, as the editor follows
+   * that image, and colour the open files again.
+   */
+  private follow(): void {
+    const id = this.ide.active?.id;
+    const names = id === undefined ? undefined : this.images.get(id);
+    this.features.clear();
+    if (names) this.features.set(names);
+    this.refresh();
   }
 
   /** Ask for the open files to be coloured again, soon. */

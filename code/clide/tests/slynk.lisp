@@ -379,6 +379,100 @@ null when this install has none; it needs a connection."
                                    (make-object "code" "1")))))))
 
 
+(defun connect-named (session slynk-port name)
+  "Open a connection called NAME to SLYNK-PORT and return the result."
+  (result (rpc session "ide/connect"
+               (make-object "port" slynk-port "name" name))))
+
+(defun eval-on (session id code)
+  "Send ide/eval for CODE on connection ID and return the reply."
+  (rpc session "ide/eval"
+       (make-object "code" code "connectionId" id)))
+
+(test ide-connections-are-numbered
+  "Each ide/connect opens a new connection with its own id, name, host
+and port, and ide/connections lists them in order."
+  (with-ide (session slynk-port)
+    (let* ((first (connect-named session slynk-port "locutus-one"))
+           (second (connect-named session slynk-port "locutus-two"))
+           (listed (gethash "connections"
+                            (result (rpc session "ide/connections")))))
+      (is (/= (gethash "connectionId" first)
+              (gethash "connectionId" second)))
+      (is (string= "locutus-two" (gethash "name" second)))
+      (is (= slynk-port (gethash "port" second)))
+      (is (= 2 (length listed)))
+      (is (equal (list "locutus-one" "locutus-two")
+                 (map 'list (lambda (entry) (gethash "name" entry))
+                      listed))))))
+
+(test ide-connections-need-an-id-when-several
+  "With several connections open a request must name one; with one it
+need not."
+  (with-ide (session slynk-port)
+    (let ((one (connect-named session slynk-port "locutus-one")))
+      (is (string= "3" (gethash "value" (eval-ide session "(+ 1 2)"))))
+      (let ((two (connect-named session slynk-port "locutus-two")))
+        (is (= -32602 (error-code (rpc session "ide/eval"
+                                       (make-object "code" "1")))))
+        (is (string= "3"
+                     (gethash "value"
+                              (result (eval-on
+                                       session
+                                       (gethash "connectionId" two)
+                                       "(+ 1 2)")))))
+        (is (string= "3"
+                     (gethash "value"
+                              (result (eval-on
+                                       session
+                                       (gethash "connectionId" one)
+                                       "(+ 1 2)")))))))))
+
+(test ide-disconnect-leaves-the-others
+  "Disconnecting one connection leaves the other working, and the one
+closed is not connected."
+  (with-ide (session slynk-port)
+    (let* ((one (gethash "connectionId"
+                         (connect-named session slynk-port "locutus-one")))
+           (two (gethash "connectionId"
+                         (connect-named session slynk-port "locutus-two"))))
+      (is (eq 'null (result (rpc session "ide/disconnect"
+                                 (make-object "connectionId" one)))))
+      (is (= -32002 (error-code (eval-on session one "1"))))
+      (is (string= "2" (gethash "value"
+                                (result (eval-on session two "(+ 1 1)")))))
+      (is (= 1 (length (gethash "connections"
+                                (result (rpc session "ide/connections")))))))))
+
+(test ide-connect-again-replaces-a-connection
+  "ide/connect with an open connectionId replaces that connection and
+keeps its id."
+  (with-ide (session slynk-port)
+    (let* ((first (connect-named session slynk-port "locutus-one"))
+           (id (gethash "connectionId" first))
+           (again (result (rpc session "ide/connect"
+                               (make-object "port" slynk-port
+                                            "name" "locutus-again"
+                                            "connectionId" id)))))
+      (is (= id (gethash "connectionId" again)))
+      (is (= 1 (length (gethash "connections"
+                                (result (rpc session "ide/connections"))))))
+      (is (string= "2" (gethash "value"
+                                (result (eval-on session id "(+ 1 1)"))))))))
+
+(test ide-notifications-carry-the-connection
+  "A REPL's notifications name the connection that sent them."
+  (with-ide (session slynk-port)
+    (connect-named session slynk-port "locutus-one")
+    (let ((two (gethash "connectionId"
+                        (connect-named session slynk-port "locutus-two"))))
+      (rpc session "ide/repl/create" (make-object "connectionId" two))
+      (is (= two (gethash "connectionId"
+                          (gethash "params"
+                                   (await-note session
+                                               "ide/repl/prompt"))))))))
+
+
 ;;; REPL tests
 
 (defun create-repl (session)

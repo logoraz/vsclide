@@ -67,6 +67,8 @@ vsclide/
     `slynk:create-server :port 0 :dont-close t`, not `start-server`
     (which enables Emacs-only output redirection)
 - Both listen on ephemeral loopback ports
+- Slynk servers that are already running, such as Nyxt's, can be
+  attached to as well (see Several connections)
 - The implementation executable is the `vsclide.lisp.command` setting
   (default `sbcl`)
 - clide runs from `code/clide`, so ocicl and ASDF resolve its systems;
@@ -130,6 +132,9 @@ vsclide/
   load on demand, as SLY does: the client keeps a list of enabled
   contribs (default `sly-fancy`), calls `slynk-add-load-paths`, then
   `slynk-require` for the modules the server has not loaded
+- One clide serves any number of slynk connections (see Several
+  connections); `ide` in `base/ide.lisp` is one connection and a `hub`
+  holds them
 - REPLs use `slynk/mrepl`, one channel per REPL; the next input is sent
   only after the prompt, to avoid slynk dropping it; notifications for a
   REPL can precede the reply that names it
@@ -149,13 +154,64 @@ vsclide/
 - Tests are compiled separately, never bundled, and run with
   `node --test`
 
+## Several connections
+
+- A connection is one slynk server with an id, a name, an origin and a
+  host and port. The origin is spawned, the Lisp VSCLIDE started and
+  stops with its connection, or attached, a running server (Nyxt's, say)
+  that VSCLIDE only disconnects from and never stops
+- clide (one process for all connections)
+  - `hub` in `base/ide.lisp` holds the table of connections by id and
+    the slynk event handlers they share; `ide` is one connection (its
+    client, its REPLs, its load lock)
+  - `ide/connect {host?, port, name?, connectionId?}` opens a new
+    connection and returns its `connectionId`, or replaces the one
+    named; `ide/connections` lists them
+  - Every other request takes an optional `connectionId`; left out it
+    means the only connection, and with several open it is an invalid
+    params error. An unknown id is `-32002`, not connected
+  - Every notification carries the `connectionId` it comes from; a
+    closed connection is forgotten and reported by `ide/disconnected`
+  - The modules (debugger, inspector, language, compiler, stickers,
+    indentation) are unchanged: their handlers receive the connection
+    in place of the single `ide` they had
+- jekyl
+  - `Connection` (`base/ide.ts`) is one connection: the per-image
+    calls (REPLs, debugger, inspector, compiling, stickers), each
+    naming its connection to clide; `Ide` holds them, one clide
+    `Session`, and the active connection
+  - The editor's requests (evaluation, completion, signature help,
+    definitions, references, compiling, stickers) go to the active
+    connection through `Ide`; REPLs, debugger levels and the inspector
+    name their own
+  - `connect()` returns the active connection, starting the Lisp when
+    there is none; `start()` starts the Lisp VSCLIDE owns whatever else
+    is connected; `attach(host, port, name?)` attaches. A connection
+    becomes active only when there is none; otherwise the user is
+    offered "Make Active"
+  - Commands: `vsclide.connectToSlynk` (host:port or a port, then an
+    optional name), `vsclide.switchConnection`, `vsclide.disconnect`
+    (the one open, or a pick), `vsclide.restart` (the Lisp VSCLIDE owns)
+  - The status bar names the active connection, with `+N` for others;
+    a click switches when there are several
+  - Per connection, with the active one in force: indentation rules
+    (`IndentRules.select`), `*features*` and so the highlighting, and
+    sticker state (armed, recordings, deleted)
+- Attaching asks the foreign slynk for the contribs clide needs
+  (`slynk/mrepl`, `slynk/stickers`, indentation) through
+  `slynk-require`, as for the spawned one
+
 ## REPL UI
 
 - A panel view container (`viewsContainers.panel`, titled mREPL) with a
   webview view and a tab list on the right, as the Terminal has; the
   native list is internal to VS Code, so jekyl draws its own
 - The panel opens empty; `VSCLIDE: Open mREPL` focuses it and opens a
-  first REPL
+  first REPL, on the active connection
+- With several connections the tab list is grouped, a heading for each
+  connection with its REPLs under it; the page names a REPL by a number
+  of the extension's, since REPL ids repeat from one connection to the
+  next
 - Enter sends, Shift+Enter adds a line, Up and Down recall history;
   Interrupt button and Ctrl+C; `view/title` buttons: new, clear, close
 - A new mREPL starts with a Sylvester banner in hot pink; SLY's art and
@@ -177,6 +233,10 @@ vsclide/
 
 - One webview panel beside the editor with two tabs, Debugger and
   Inspector; the bottom mREPL is for the REPL only
+- Each connection has its own debugger and inspector models; with
+  several connections a grouped list at the left names each, with
+  Debugger (levels open) and Inspector under it, and a debugger that
+  opens takes the view
 - clide: `base/debugger.lisp` and `base/inspector.lisp` register the
   `ide/debug/*` and `ide/inspect/*` methods and their slynk event
   handlers
@@ -398,7 +458,23 @@ vsclide/
 
 In this order.
 
-### 1. Eclector completion backend
+### 1. Several connections, what is left
+
+Built (see Several connections): attaching to running slynk servers,
+several connections at once, the grouped lists, the active connection.
+
+- The debugger and inspector list gets an entry for each open thing:
+  "Debugger 1", "Debugger 2", one per level, and "Inspector: #<FOO>",
+  one per inspected object, so an earlier level can be seen without
+  leaving the current one; today there are two entries for each
+  connection
+- Open a REPL on a connection other than the active one, from the
+  list's heading
+- Tested in clide against the slynk of its own image; the extension's
+  side and a foreign slynk (Nyxt) are still to be tried, and clide
+  should degrade gracefully where its contribs are missing
+
+### 2. Eclector completion backend
 
 - A Lisp-side reader that tolerates incomplete and erroneous source,
   built on eclector; it is the base of the editing arm
@@ -409,7 +485,7 @@ In this order.
   fails to extract eclector ("file name contained an unexpected NUL
   byte"), which must be resolved first
 
-### 2. Syntax highlighting guided by the eclector reader
+### 3. Syntax highlighting guided by the eclector reader
 
 - The reader decides what each symbol is, so the colors follow what the
   code means, not what a grammar guesses; layers, from first to last
@@ -447,7 +523,7 @@ In this order.
   TextMate grammar and its tests; the language contribution and
   `language-configuration.json` stay
 
-### 3. EGCL support
+### 4. EGCL support
 
 EGCL (Evergreen Common Lisp) is the second target after SBCL. Known so
 far:

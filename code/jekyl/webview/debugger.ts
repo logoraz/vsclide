@@ -343,6 +343,42 @@ function renderInspector(state: PanelState): void {
 }
 
 
+/// Connections
+
+/**
+ * Draw the grouped list: a heading for each connection, and under it its
+ * debugger and inspector. Hidden while there is one connection, when the
+ * tabs say enough.
+ */
+function renderSidebar(state: PanelState): void {
+  const sidebar = element("sidebar");
+  sidebar.textContent = "";
+  sidebar.classList.toggle("shown", state.connections.length > 1);
+  for (const connection of state.connections) {
+    const group = make("div");
+    group.appendChild(make("div", "group-name", connection.name));
+    const entries: [PanelState["tab"], string][] = [
+      [
+        "debugger",
+        connection.levels > 0
+          ? `Debugger (${connection.levels})`
+          : "Debugger",
+      ],
+      ["inspector", connection.inspecting ? "Inspector \u2022" : "Inspector"],
+    ];
+    for (const [tab, label] of entries) {
+      const on = connection.id === state.viewing && tab === state.tab;
+      const entry = make("div", on ? "entry active" : "entry", label);
+      entry.addEventListener("click", () =>
+        vscode.postMessage({ type: "view", connectionId: connection.id, tab }),
+      );
+      group.appendChild(entry);
+    }
+    sidebar.appendChild(group);
+  }
+}
+
+
 /// State
 
 let lastTab: string | undefined;
@@ -355,6 +391,7 @@ function render(state: PanelState): void {
   }
   const notice = element("notice");
   notice.textContent = state.notice ?? "";
+  renderSidebar(state);
   renderDebugger(state);
   renderInspector(state);
   if (lastTab !== state.tab) {

@@ -1,5 +1,5 @@
 import * as vscode from "vscode";
-import { EvalResult, Ide } from "../base/ide";
+import { Connection, EvalResult, Ide } from "../base/ide";
 import { CompileResult, summarize } from "../base/language";
 import {
   Range,
@@ -8,6 +8,7 @@ import {
   scanForms,
   topLevelFormAt,
 } from "../lib/forms";
+import { DEFAULT_HOST, parseEndpoint } from "../lib/endpoint";
 import { DebugPanel } from "./debug-panel";
 import { Diagnostics } from "./diagnostics";
 import { ReplView } from "./repl";
@@ -118,6 +119,88 @@ async function guarded(
       `VSCLIDE: ${(error as Error).message}`,
     );
   }
+}
+
+/** Say in a quick pick which connection, and return it; undefined if none. */
+async function pickConnection(
+  context: CommandContext,
+  placeHolder: string,
+): Promise<Connection | undefined> {
+  const connections = context.ide.connections;
+  if (connections.length === 0) return undefined;
+  const active = context.ide.active;
+  const picked = await vscode.window.showQuickPick(
+    connections.map((connection) => ({
+      label: connection.name,
+      description: `${connection.host}:${connection.port}`,
+      detail:
+        (connection === active ? "active; " : "") +
+        (connection.origin === "spawned"
+          ? "started by VSCLIDE, stopped with it"
+          : "attached, left running when disconnected"),
+      connection,
+    })),
+    { placeHolder },
+  );
+  return picked?.connection;
+}
+
+/** Ask for a running slynk server and attach to it, as sly-connect. */
+async function connectToSlynk(context: CommandContext): Promise<void> {
+  const text = await vscode.window.showInputBox({
+    prompt: "Slynk server to connect to, as host:port or just a port",
+    value: `${DEFAULT_HOST}:4005`,
+    validateInput: (value) =>
+      parseEndpoint(value) ? undefined : "Use host:port, or a port",
+  });
+  const endpoint = text === undefined ? undefined : parseEndpoint(text);
+  if (!endpoint) return;
+  const name = await vscode.window.showInputBox({
+    prompt: "Name for this connection (Enter for host:port)",
+    value: "",
+  });
+  if (name === undefined) return;
+  context.status.connecting();
+  const connection = await context.ide.attach(
+    endpoint.host,
+    endpoint.port,
+    name.trim() === "" ? undefined : name.trim(),
+  );
+  context.status.render();
+  const active = context.ide.active === connection;
+  const choice = await vscode.window.showInformationMessage(
+    `VSCLIDE: connected to ${connection.name}` +
+      (active ? "" : "; the editor still uses another connection"),
+    ...(active ? [] : ["Make Active"]),
+  );
+  if (choice === "Make Active") context.ide.setActive(connection.id);
+}
+
+/** Choose the connection the editor's requests go to. */
+async function switchConnection(context: CommandContext): Promise<void> {
+  if (context.ide.connections.length === 0) {
+    void vscode.window.showInformationMessage("VSCLIDE: not connected.");
+    return;
+  }
+  const connection = await pickConnection(
+    context,
+    "Use this connection for evaluation, completion and the rest",
+  );
+  if (connection) context.ide.setActive(connection.id);
+  context.status.render();
+}
+
+/**
+ * End a connection: the only one, or the one picked. The Lisp VSCLIDE
+ * started stops with its connection; an attached server keeps running.
+ */
+async function disconnect(context: CommandContext): Promise<void> {
+  const connections = context.ide.connections;
+  const connection =
+    connections.length > 1
+      ? await pickConnection(context, "Disconnect which connection?")
+      : connections[0];
+  if (connection) await context.ide.disconnect(connection.id);
 }
 
 /** Say what compiling came to: in the log and briefly in the status bar. */
@@ -275,25 +358,34 @@ export function registerCommands(
     register("connect", () =>
       guarded(context, async () => {
         context.status.connecting();
-        const info = await context.ide.connect();
+        const connection = await context.ide.connect();
         context.status.render();
-        const { name, version } = info.implementation;
+        const { name, version } = connection.info.implementation;
         void vscode.window.showInformationMessage(
-          `VSCLIDE: connected to ${name} ${version}`,
+          `VSCLIDE: connected to ${connection.name} (${name} ${version})`,
         );
       }),
     ),
+    register("connectToSlynk", () =>
+      guarded(context, () => connectToSlynk(context)),
+    ),
+    register("switchConnection", () =>
+      guarded(context, () => switchConnection(context)),
+    ),
     register("disconnect", () =>
       guarded(context, async () => {
-        await context.ide.disconnect();
+        await disconnect(context);
         context.status.render();
       }),
     ),
     register("restart", () =>
       guarded(context, async () => {
         context.status.connecting();
-        await context.ide.disconnect();
-        await context.ide.connect();
+        const old = context.ide.connections.find((c) => c.origin === "spawned");
+        const wasActive = old !== undefined && context.ide.active === old;
+        if (old) await context.ide.disconnect(old.id);
+        const fresh = await context.ide.start();
+        if (wasActive) context.ide.setActive(fresh.id);
         context.status.render();
       }),
     ),

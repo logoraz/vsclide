@@ -32,19 +32,26 @@ export class Indentation
 
   /**
    * Register the commands and the listener for the Lisp's rules, and
-   * return what to dispose of. A new connection starts with the table
-   * alone, and asks the Lisp for what it knows.
+   * return what to dispose of. Each connection keeps its own rules, and
+   * those of the active one are in force. A new connection starts with
+   * the table alone, and asks its Lisp for what it knows.
    */
   register(): vscode.Disposable[] {
     return [
       new vscode.Disposable(
         this.ide.onEvent((event) => {
           if (event.type === "connected") {
-            this.rules.clear();
-            this.ide.startIndentation().catch(() => undefined);
+            this.rules.clear(event.connectionId);
+            this.ide
+              .get(event.connectionId)
+              ?.startIndentation()
+              .catch(() => undefined);
           } else if (event.type === "indentation") {
-            this.rules.update(event.rules);
+            this.rules.update(event.rules, event.connectionId);
+          } else if (event.type === "disconnected") {
+            this.rules.clear(event.connectionId);
           }
+          this.rules.select(this.ide.active?.id);
         }),
       ),
       vscode.commands.registerTextEditorCommand("vsclide.indent", (editor) =>

@@ -123,7 +123,8 @@ export function activate(context: vscode.ExtensionContext): void {
   const repl = new ReplView(
     context.extensionUri,
     ide,
-    (replId, entry, value) => panel.inspectReplValue(replId, entry, value),
+    (connectionId, replId, entry, value) =>
+      panel.inspectReplValue(connectionId, replId, entry, value),
     (line) => output.appendLine(line),
   );
   context.subscriptions.push(
@@ -178,7 +179,9 @@ export function activate(context: vscode.ExtensionContext): void {
       ide.onEvent((event) => {
         if (event.type === "output") output.append(event.text);
         if (event.type === "disconnected") {
-          output.appendLine(`;; disconnected: ${event.reason}`);
+          output.appendLine(
+            `;; connection ${event.connectionId} gone: ${event.reason}`,
+          );
         }
       }),
     ),

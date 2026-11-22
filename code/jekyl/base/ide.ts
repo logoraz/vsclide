@@ -67,8 +67,14 @@ export interface EvalResult {
   error: string | null;
 }
 
-/** Something that happened that the user interface may show. */
-export type IdeEvent =
+/**
+ * Where a connection came from: a Lisp VSCLIDE started and stops, or a
+ * running slynk it attached to and only disconnects.
+ */
+export type Origin = "spawned" | "attached";
+
+/** What happened on one connection; the event names it. */
+export type ConnectionEvent =
   | { type: "connected"; info: ConnectionInfo }
   | { type: "disconnected"; reason: string }
   | { type: "output"; text: string }
@@ -97,6 +103,14 @@ export type IdeEvent =
   | { type: "indentation"; rules: LiveRule[] }
   | { type: "features"; features: string[] };
 
+/**
+ * Something that happened that the user interface may show: an event of
+ * a connection, which names it, or a change of the active connection.
+ */
+export type IdeEvent =
+  | (ConnectionEvent & { connectionId: number })
+  | { type: "active"; connectionId: number | undefined };
+
 type Params = Record<string, unknown>;
 
 function text(value: unknown): string {
@@ -108,14 +122,25 @@ function num(value: unknown): number {
 }
 
 /**
- * Turn a notification from clide into an event, or undefined when it
- * is not one the interface knows. ide/disconnected is handled by the
- * controller itself, as it also changes its state.
+ * Turn a notification from clide into an event of the connection it
+ * names, or undefined when it is not one the interface knows.
+ * ide/disconnected is handled by the controller itself, as it also
+ * changes its state.
  */
 export function parseNotification(
   method: string,
   params: unknown,
 ): IdeEvent | undefined {
+  const body = parseBody(method, params);
+  if (!body) return undefined;
+  const p = (params ?? {}) as Params;
+  return { ...body, connectionId: num(p.connectionId) };
+}
+
+function parseBody(
+  method: string,
+  params: unknown,
+): ConnectionEvent | undefined {
   const p = (params ?? {}) as Params;
   switch (method) {
     case "ide/output":
@@ -194,62 +219,31 @@ export function parseNotification(
 }
 
 /**
- * The IDE's controller: starts the slynk server, has clide connect to
- * it, and offers evaluation and REPLs. Everything that changes is
- * reported as an IdeEvent. It knows nothing of VS Code.
+ * One connection to a slynk server, held by clide: the image's REPLs,
+ * debugger, inspector, compiler and stickers. Every request names the
+ * connection to clide. It knows nothing of VS Code.
  */
-export class Ide {
-  private slynk: LispProcess | undefined;
-  private info: ConnectionInfo | undefined;
-  private connecting: Promise<ConnectionInfo> | undefined;
-  private readonly listeners = new Set<(event: IdeEvent) => void>();
-
-  /**
-   * SESSION runs clide. SLYNK is called each time a slynk server has
-   * to be started.
-   */
+export class Connection {
   constructor(
-    private readonly session: Session,
-    private readonly slynkLaunch: () => LaunchOptions | Promise<LaunchOptions>,
-  ) {
-    session.onNotification((method, params) =>
-      this.onNotification(method, params),
-    );
-    session.onExit(() => this.drop("clide exited"));
-  }
+    /** The id clide gave it; REPL ids and thread ids are its own. */
+    readonly id: number,
+    /** What the user sees: "SBCL", or the name given when attaching. */
+    readonly name: string,
+    readonly origin: Origin,
+    readonly host: string,
+    readonly port: number,
+    /** What slynk reported when it connected. */
+    readonly info: ConnectionInfo,
+    private readonly send: (method: string, params: Params) => Promise<unknown>,
+  ) {}
 
-  /** What slynk reported when connected, or undefined. */
-  get connection(): ConnectionInfo | undefined {
-    return this.info;
-  }
-
-  /** Call LISTENER for each event; returns a function that stops it. */
-  onEvent(listener: (event: IdeEvent) => void): () => void {
-    this.listeners.add(listener);
-    return () => this.listeners.delete(listener);
-  }
-
-  /**
-   * Start the Lisp and connect to it, if not already. Resolves with
-   * what slynk reports about itself.
-   */
-  connect(): Promise<ConnectionInfo> {
-    if (this.info) return Promise.resolve(this.info);
-    this.connecting ??= this.open().finally(() => {
-      this.connecting = undefined;
-    });
-    return this.connecting;
-  }
-
-  /** Disconnect and stop the Lisp. */
-  async disconnect(): Promise<void> {
-    const slynk = this.slynk;
-    this.slynk = undefined;
-    if (this.info) {
-      await this.session.request("ide/disconnect").catch(() => undefined);
-      this.drop("disconnected", false);
-    }
-    await slynk?.stop();
+  /** Send METHOD for this connection to clide and return the result. */
+  private request<T = unknown>(
+    method: string,
+    params: Params = {},
+  ): Promise<T> {
+    const named = { ...params, connectionId: this.id };
+    return this.send(method, named) as Promise<T>;
   }
 
   /**
@@ -262,8 +256,7 @@ export class Ide {
     packageName?: string,
     debug = false,
   ): Promise<EvalResult> {
-    await this.connect();
-    return this.session.request<EvalResult>("ide/eval", {
+    return this.request<EvalResult>("ide/eval", {
       code,
       package: packageName,
       debug: debug || undefined,
@@ -275,8 +268,7 @@ export class Ide {
    * undefined when there is none.
    */
   async sylvesters(): Promise<string | undefined> {
-    await this.connect();
-    const reply = await this.session.request<{ text: string | null }>(
+    const reply = await this.request<{ text: string | null }>(
       "ide/sylvesters",
     );
     return reply.text ?? undefined;
@@ -288,7 +280,7 @@ export class Ide {
    * Resolve with false when its slynk has no indentation contrib.
    */
   async startIndentation(): Promise<boolean> {
-    const reply = await this.session.request<{ loaded: boolean }>(
+    const reply = await this.request<{ loaded: boolean }>(
       "ide/indentation",
     );
     return reply.loaded === true;
@@ -296,8 +288,7 @@ export class Ide {
 
   /** Open a REPL and resolve with its id. */
   async createRepl(): Promise<number> {
-    await this.connect();
-    const reply = await this.session.request<{ replId: number }>(
+    const reply = await this.request<{ replId: number }>(
       "ide/repl/create",
     );
     return reply.replId;
@@ -305,17 +296,17 @@ export class Ide {
 
   /** Give REPL one line, or several, of input. */
   async sendToRepl(replId: number, input: string): Promise<void> {
-    await this.session.request("ide/repl/send", { replId, text: input });
+    await this.request("ide/repl/send", { replId, text: input });
   }
 
   /** Interrupt what REPL is evaluating. */
   async interruptRepl(replId: number): Promise<void> {
-    await this.session.request("ide/repl/interrupt", { replId });
+    await this.request("ide/repl/interrupt", { replId });
   }
 
   /** End REPL. */
   async closeRepl(replId: number): Promise<void> {
-    await this.session.request("ide/repl/close", { replId });
+    await this.request("ide/repl/close", { replId });
   }
 
   /** Fetch frames START to END, or to the bottom, of a debugger thread. */
@@ -324,7 +315,7 @@ export class Ide {
     start: number,
     end?: number,
   ): Promise<Frame[]> {
-    const reply = await this.session.request<{ frames: unknown }>(
+    const reply = await this.request<{ frames: unknown }>(
       "ide/debug/backtrace",
       { threadId, start, end },
     );
@@ -334,7 +325,7 @@ export class Ide {
   /** Fetch the locals, package and source location of a frame. */
   async debugFrame(threadId: number, frame: number): Promise<FrameDetails> {
     return parseFrameDetails(
-      await this.session.request("ide/debug/frame", { threadId, frame }),
+      await this.request("ide/debug/frame", { threadId, frame }),
     );
   }
 
@@ -344,7 +335,7 @@ export class Ide {
     level: number,
     index: number,
   ): Promise<void> {
-    await this.session.request("ide/debug/restart", {
+    await this.request("ide/debug/restart", {
       threadId,
       level,
       index,
@@ -353,17 +344,17 @@ export class Ide {
 
   /** Return to the previous debugger level. */
   async debugAbort(threadId: number): Promise<void> {
-    await this.session.request("ide/debug/abort", { threadId });
+    await this.request("ide/debug/abort", { threadId });
   }
 
   /** Abandon the evaluation, whatever the level. */
   async debugQuit(threadId: number): Promise<void> {
-    await this.session.request("ide/debug/quit", { threadId });
+    await this.request("ide/debug/quit", { threadId });
   }
 
   /** Use the continue restart. */
   async debugContinue(threadId: number): Promise<void> {
-    await this.session.request("ide/debug/continue", { threadId });
+    await this.request("ide/debug/continue", { threadId });
   }
 
   /** Evaluate CODE in a frame; PPRINT asks for pretty-printed values. */
@@ -374,7 +365,7 @@ export class Ide {
     packageName?: string,
     pprint = false,
   ): Promise<{ ok: boolean; text: string }> {
-    return this.session.request("ide/debug/eval", {
+    return this.request("ide/debug/eval", {
       threadId,
       frame,
       code,
@@ -389,7 +380,7 @@ export class Ide {
     frame: number,
     kind: "into" | "next" | "out",
   ): Promise<void> {
-    await this.session.request("ide/debug/step", { threadId, frame, kind });
+    await this.request("ide/debug/step", { threadId, frame, kind });
   }
 
   /** Return the value of CODE from a frame. */
@@ -398,7 +389,7 @@ export class Ide {
     frame: number,
     code: string,
   ): Promise<void> {
-    await this.session.request("ide/debug/returnFrom", {
+    await this.request("ide/debug/returnFrom", {
       threadId,
       frame,
       code,
@@ -407,13 +398,12 @@ export class Ide {
 
   /** Run a frame again from its start. */
   async debugRestartFrame(threadId: number, frame: number): Promise<void> {
-    await this.session.request("ide/debug/restartFrame", { threadId, frame });
+    await this.request("ide/debug/restartFrame", { threadId, frame });
   }
 
   /** Toggle *break-on-signals*, and say what it is now. */
   async breakOnSignals(): Promise<string> {
-    await this.connect();
-    const reply = await this.session.request<{ message: string }>(
+    const reply = await this.request<{ message: string }>(
       "ide/debug/breakOnSignals",
     );
     return reply.message;
@@ -424,9 +414,8 @@ export class Ide {
     code: string,
     packageName?: string,
   ): Promise<Inspected | undefined> {
-    await this.connect();
     return parseInspected(
-      await this.session.request("ide/inspect/init", {
+      await this.request("ide/inspect/init", {
         code,
         package: packageName,
       }),
@@ -436,51 +425,51 @@ export class Ide {
   /** Inspect the value part INDEX of the object shown. */
   async inspectPart(index: number): Promise<Inspected | undefined> {
     return parseInspected(
-      await this.session.request("ide/inspect/part", { index }),
+      await this.request("ide/inspect/part", { index }),
     );
   }
 
   /** Go back to the previous object; undefined when there is none. */
   async inspectPop(): Promise<Inspected | undefined> {
-    return parseInspected(await this.session.request("ide/inspect/pop"));
+    return parseInspected(await this.request("ide/inspect/pop"));
   }
 
   /** Go forward again after a pop; undefined when there is nothing. */
   async inspectNext(): Promise<Inspected | undefined> {
-    return parseInspected(await this.session.request("ide/inspect/next"));
+    return parseInspected(await this.request("ide/inspect/next"));
   }
 
   /** Fetch the object shown again. */
   async inspectReinspect(): Promise<Inspected | undefined> {
     return parseInspected(
-      await this.session.request("ide/inspect/reinspect"),
+      await this.request("ide/inspect/reinspect"),
     );
   }
 
   /** Print the object shown with more or less detail. */
   async inspectToggleVerbose(): Promise<Inspected | undefined> {
     return parseInspected(
-      await this.session.request("ide/inspect/toggleVerbose"),
+      await this.request("ide/inspect/toggleVerbose"),
     );
   }
 
   /** Fetch parts FROM to TO of the object shown. */
   async inspectRange(from: number, to: number): Promise<Range> {
     return parseRange(
-      await this.session.request("ide/inspect/range", { from, to }),
+      await this.request("ide/inspect/range", { from, to }),
     );
   }
 
   /** Run action part INDEX; undefined when it asks for no refresh. */
   async inspectAction(index: number): Promise<Inspected | undefined> {
     return parseInspected(
-      await this.session.request("ide/inspect/action", { index }),
+      await this.request("ide/inspect/action", { index }),
     );
   }
 
   /** Evaluate CODE with * bound to the object shown. */
   async inspectEval(code: string): Promise<string> {
-    const reply = await this.session.request<{ text: string }>(
+    const reply = await this.request<{ text: string }>(
       "ide/inspect/eval",
       { code },
     );
@@ -489,7 +478,7 @@ export class Ide {
 
   /** Describe the object shown, or its part INDEX. */
   async inspectDescribe(index?: number): Promise<string> {
-    const reply = await this.session.request<{ text: string }>(
+    const reply = await this.request<{ text: string }>(
       "ide/inspect/describe",
       { index },
     );
@@ -503,7 +492,7 @@ export class Ide {
     code: string,
   ): Promise<Inspected | undefined> {
     return parseInspected(
-      await this.session.request("ide/inspect/frame", {
+      await this.request("ide/inspect/frame", {
         threadId,
         frame,
         code,
@@ -518,7 +507,7 @@ export class Ide {
     variable: number,
   ): Promise<Inspected | undefined> {
     return parseInspected(
-      await this.session.request("ide/inspect/frameVar", {
+      await this.request("ide/inspect/frameVar", {
         threadId,
         frame,
         var: variable,
@@ -529,7 +518,7 @@ export class Ide {
   /** Inspect the condition a debugger thread is handling. */
   async inspectCondition(threadId: number): Promise<Inspected | undefined> {
     return parseInspected(
-      await this.session.request("ide/inspect/condition", { threadId }),
+      await this.request("ide/inspect/condition", { threadId }),
     );
   }
 
@@ -543,17 +532,12 @@ export class Ide {
     value: number,
   ): Promise<Inspected | undefined> {
     return parseInspected(
-      await this.session.request("ide/inspect/replValue", {
+      await this.request("ide/inspect/replValue", {
         replId,
         entry,
         value,
       }),
     );
-  }
-
-  /** True while connected to slynk. */
-  get connected(): boolean {
-    return this.info !== undefined;
   }
 
   /**
@@ -566,9 +550,8 @@ export class Ide {
     packageName?: string,
     limit?: number,
   ): Promise<Completion[]> {
-    if (!this.info) return [];
     return parseCompletions(
-      await this.session.request("ide/complete", {
+      await this.request("ide/complete", {
         prefix,
         package: packageName,
         limit,
@@ -581,8 +564,7 @@ export class Ide {
     name: string,
     packageName?: string,
   ): Promise<string | undefined> {
-    if (!this.info) return undefined;
-    const reply = await this.session.request<{ arglist: string | null }>(
+    const reply = await this.request<{ arglist: string | null }>(
       "ide/arglist",
       { name, package: packageName },
     );
@@ -594,8 +576,7 @@ export class Ide {
     name: string,
     packageName?: string,
   ): Promise<string | undefined> {
-    if (!this.info) return undefined;
-    const reply = await this.session.request<{ text: string | null }>(
+    const reply = await this.request<{ text: string | null }>(
       "ide/documentation",
       { name, package: packageName },
     );
@@ -610,9 +591,8 @@ export class Ide {
     name: string,
     packageName?: string,
   ): Promise<Definition[]> {
-    if (!this.info) return [];
     return parseDefinitions(
-      await this.session.request("ide/definitions", {
+      await this.request("ide/definitions", {
         name,
         package: packageName,
       }),
@@ -628,9 +608,8 @@ export class Ide {
     packageName?: string,
     kinds?: string[],
   ): Promise<Reference[]> {
-    if (!this.info) return [];
     return parseReferences(
-      await this.session.request("ide/xref", {
+      await this.request("ide/xref", {
         name,
         package: packageName,
         kinds,
@@ -643,7 +622,7 @@ export class Ide {
    * prompt arrives as a replPrompt event.
    */
   async syncReplPackage(replId: number, packageName: string): Promise<void> {
-    await this.session.request("ide/repl/syncPackage", {
+    await this.request("ide/repl/syncPackage", {
       replId,
       package: packageName,
     });
@@ -661,9 +640,8 @@ export class Ide {
     file?: string,
     packageName?: string,
   ): Promise<CompileResult> {
-    await this.connect();
     return parseCompileResult(
-      await this.session.request("ide/compile", {
+      await this.request("ide/compile", {
         code,
         position,
         file,
@@ -674,9 +652,8 @@ export class Ide {
 
   /** Compile FILE, and load it when LOAD is true. */
   async compileFile(file: string, load: boolean): Promise<CompileResult> {
-    await this.connect();
     return parseCompileResult(
-      await this.session.request("ide/compileFile", { file, load }),
+      await this.request("ide/compileFile", { file, load }),
     );
   }
 
@@ -694,9 +671,8 @@ export class Ide {
     stickers: number[],
     dead: number[],
   ): Promise<StickerCompile> {
-    await this.connect();
     return parseStickerCompile(
-      await this.session.request("ide/stickers/compile", {
+      await this.request("ide/stickers/compile", {
         code,
         original,
         position,
@@ -710,15 +686,14 @@ export class Ide {
 
   /** Forget the stickers IDS. */
   async killStickers(ids: number[]): Promise<void> {
-    if (!this.info || ids.length === 0) return;
-    await this.session.request("ide/stickers/kill", { ids });
+    if (ids.length === 0) return;
+    await this.request("ide/stickers/kill", { ids });
   }
 
   /** Describe every sticker the image knows; DEAD are forgotten. */
   async fetchStickers(dead: number[]): Promise<StickerInfo[]> {
-    await this.connect();
     return parseStickers(
-      await this.session.request("ide/stickers/fetch", { dead }),
+      await this.request("ide/stickers/fetch", { dead }),
     );
   }
 
@@ -727,9 +702,8 @@ export class Ide {
     search: Search,
     dead: number[],
   ): Promise<Playhead | { error: string }> {
-    await this.connect();
     return parsePlayhead(
-      await this.session.request("ide/stickers/search", {
+      await this.request("ide/stickers/search", {
         ...search,
         key: 1,
         dead,
@@ -739,8 +713,7 @@ export class Ide {
 
   /** Forget the recordings, or the first HOWMANY; return what is left. */
   async forgetRecordings(dead: number[], howMany?: number): Promise<number> {
-    await this.connect();
-    const reply = await this.session.request<{ remaining: number }>(
+    const reply = await this.request<{ remaining: number }>(
       "ide/stickers/forget",
       { dead, howMany },
     );
@@ -749,8 +722,7 @@ export class Ide {
 
   /** Switch breaking on every sticker; return whether it is on now. */
   async toggleBreakOnStickers(): Promise<boolean> {
-    await this.connect();
-    const reply = await this.session.request<{ on: boolean }>(
+    const reply = await this.request<{ on: boolean }>(
       "ide/stickers/toggleBreak",
     );
     return reply.on === true;
@@ -760,42 +732,410 @@ export class Ide {
   async inspectSticker(
     target: { sticker: number } | { recording: number; value?: number },
   ): Promise<Inspected | undefined> {
-    await this.connect();
     return parseInspected(
-      await this.session.request("ide/stickers/inspect", target),
+      await this.request("ide/stickers/inspect", target),
     );
+  }
+}
+
+/** A connection and, when VSCLIDE started its Lisp, the process. */
+interface Entry {
+  connection: Connection;
+  slynk?: LispProcess;
+}
+
+/**
+ * The IDE's controller: it has clide, one process for all of them, hold
+ * several connections to slynk servers, those it starts itself and those
+ * it attaches to, and keeps one of them active. The editor's requests
+ * (evaluation, completion, definitions, compiling) go to the active
+ * connection; the REPLs, the debugger and the inspector name theirs.
+ * Everything that changes is reported as an IdeEvent. It knows nothing
+ * of VS Code.
+ */
+export class Ide {
+  private readonly entries = new Map<number, Entry>();
+  private activeId: number | undefined;
+  private spawning: Promise<Connection> | undefined;
+  private readonly listeners = new Set<(event: IdeEvent) => void>();
+
+  /**
+   * SESSION runs clide. SLYNK is called each time a slynk server has
+   * to be started.
+   */
+  constructor(
+    private readonly session: Session,
+    private readonly slynkLaunch: () => LaunchOptions | Promise<LaunchOptions>,
+  ) {
+    session.onNotification((method, params) =>
+      this.onNotification(method, params),
+    );
+    session.onExit(() => this.dropAll("clide exited"));
+  }
+
+  /** The open connections, by id. */
+  get connections(): Connection[] {
+    return [...this.entries.values()]
+      .map((entry) => entry.connection)
+      .sort((a, b) => a.id - b.id);
+  }
+
+  /** The connection the editor's requests go to, or undefined. */
+  get active(): Connection | undefined {
+    return this.activeId === undefined
+      ? undefined
+      : this.entries.get(this.activeId)?.connection;
+  }
+
+  /** What slynk reported of the active connection, or undefined. */
+  get connection(): ConnectionInfo | undefined {
+    return this.active?.info;
+  }
+
+  /** True while there is an active connection. */
+  get connected(): boolean {
+    return this.active !== undefined;
+  }
+
+  /** The connection with ID, or undefined once it has gone. */
+  get(id: number): Connection | undefined {
+    return this.entries.get(id)?.connection;
+  }
+
+  /** Make the connection ID the active one. */
+  setActive(id: number): void {
+    if (!this.entries.has(id) || id === this.activeId) return;
+    this.activeId = id;
+    this.emit({ type: "active", connectionId: id });
+  }
+
+  /** Call LISTENER for each event; returns a function that stops it. */
+  onEvent(listener: (event: IdeEvent) => void): () => void {
+    this.listeners.add(listener);
+    return () => this.listeners.delete(listener);
+  }
+
+  /**
+   * Return the active connection. With none, start the Lisp and connect
+   * to it, as the first use of the IDE does.
+   */
+  connect(): Promise<Connection> {
+    return this.active ? Promise.resolve(this.active) : this.start();
+  }
+
+  /**
+   * Return the connection to the Lisp VSCLIDE owns, starting the Lisp
+   * when it is not running, whatever else is connected. It becomes the
+   * active connection only when there is none.
+   */
+  start(): Promise<Connection> {
+    const spawned = this.connections.find((c) => c.origin === "spawned");
+    if (spawned) return Promise.resolve(spawned);
+    this.spawning ??= this.spawn().finally(() => {
+      this.spawning = undefined;
+    });
+    return this.spawning;
+  }
+
+  /**
+   * Connect to a slynk server that is already running, as SLY's
+   * sly-connect does. The connection is called NAME, or HOST:PORT. A
+   * server already attached is returned as it is. It becomes the active
+   * connection only when there is none; VSCLIDE never stops that server.
+   */
+  async attach(
+    host: string,
+    port: number,
+    name?: string,
+  ): Promise<Connection> {
+    const known = this.connections.find(
+      (connection) =>
+        connection.origin === "attached" &&
+        connection.host === host &&
+        connection.port === port,
+    );
+    if (known) return known;
+    await this.session.ensure();
+    return this.open(host, port, "attached", name);
+  }
+
+  /**
+   * End the connection ID. The Lisp VSCLIDE started is stopped with
+   * it; a server it attached to is left running.
+   */
+  async disconnect(id: number): Promise<void> {
+    const entry = this.entries.get(id);
+    if (!entry) return;
+    await this.session
+      .request("ide/disconnect", { connectionId: id })
+      .catch(() => undefined);
+    this.drop(id, "disconnected", false);
+    await entry.slynk?.stop();
+  }
+
+  /** End every connection. */
+  async disconnectAll(): Promise<void> {
+    await Promise.all(this.connections.map((c) => this.disconnect(c.id)));
   }
 
   /** Disconnect, then stop slynk and clide. */
   async stop(): Promise<void> {
-    await this.disconnect();
+    await this.disconnectAll();
     await this.session.stop();
   }
 
-  private async open(): Promise<ConnectionInfo> {
+  private async requireActive(): Promise<Connection> {
+    const active = this.active;
+    if (!active) throw new Error("Not connected to slynk.");
+    return active;
+  }
+
+  /**
+   * Run evaluate on the active connection, starting the Lisp
+   * if none.
+   */
+  async evaluate(
+    ...args: Parameters<Connection["evaluate"]>
+  ): ReturnType<Connection["evaluate"]> {
+    return (await this.connect()).evaluate(...args);
+  }
+
+  /**
+   * Run sylvesters on the active connection, starting the Lisp
+   * if none.
+   */
+  async sylvesters(
+    ...args: Parameters<Connection["sylvesters"]>
+  ): ReturnType<Connection["sylvesters"]> {
+    return (await this.connect()).sylvesters(...args);
+  }
+
+  /**
+   * Run breakOnSignals on the active connection, starting the Lisp
+   * if none.
+   */
+  async breakOnSignals(
+    ...args: Parameters<Connection["breakOnSignals"]>
+  ): ReturnType<Connection["breakOnSignals"]> {
+    return (await this.connect()).breakOnSignals(...args);
+  }
+
+  /**
+   * Run compile on the active connection, starting the Lisp
+   * if none.
+   */
+  async compile(
+    ...args: Parameters<Connection["compile"]>
+  ): ReturnType<Connection["compile"]> {
+    return (await this.connect()).compile(...args);
+  }
+
+  /**
+   * Run compileFile on the active connection, starting the Lisp
+   * if none.
+   */
+  async compileFile(
+    ...args: Parameters<Connection["compileFile"]>
+  ): ReturnType<Connection["compileFile"]> {
+    return (await this.connect()).compileFile(...args);
+  }
+
+  /**
+   * Run compileStickered on the active connection, starting the Lisp
+   * if none.
+   */
+  async compileStickered(
+    ...args: Parameters<Connection["compileStickered"]>
+  ): ReturnType<Connection["compileStickered"]> {
+    return (await this.connect()).compileStickered(...args);
+  }
+
+  /**
+   * Run fetchStickers on the active connection, starting the Lisp
+   * if none.
+   */
+  async fetchStickers(
+    ...args: Parameters<Connection["fetchStickers"]>
+  ): ReturnType<Connection["fetchStickers"]> {
+    return (await this.connect()).fetchStickers(...args);
+  }
+
+  /**
+   * Run searchRecordings on the active connection, starting the Lisp
+   * if none.
+   */
+  async searchRecordings(
+    ...args: Parameters<Connection["searchRecordings"]>
+  ): ReturnType<Connection["searchRecordings"]> {
+    return (await this.connect()).searchRecordings(...args);
+  }
+
+  /**
+   * Run forgetRecordings on the active connection, starting the Lisp
+   * if none.
+   */
+  async forgetRecordings(
+    ...args: Parameters<Connection["forgetRecordings"]>
+  ): ReturnType<Connection["forgetRecordings"]> {
+    return (await this.connect()).forgetRecordings(...args);
+  }
+
+  /**
+   * Run toggleBreakOnStickers on the active connection, starting the Lisp
+   * if none.
+   */
+  async toggleBreakOnStickers(
+    ...args: Parameters<Connection["toggleBreakOnStickers"]>
+  ): ReturnType<Connection["toggleBreakOnStickers"]> {
+    return (await this.connect()).toggleBreakOnStickers(...args);
+  }
+
+  /**
+   * Run inspectSticker on the active connection, starting the Lisp
+   * if none.
+   */
+  async inspectSticker(
+    ...args: Parameters<Connection["inspectSticker"]>
+  ): ReturnType<Connection["inspectSticker"]> {
+    return (await this.connect()).inspectSticker(...args);
+  }
+
+  /**
+   * Run complete on the active connection; with none, nothing is
+   * done and no Lisp is started.
+   */
+  async complete(
+    ...args: Parameters<Connection["complete"]>
+  ): ReturnType<Connection["complete"]> {
+    const active = this.active;
+    return (active ? active.complete(...args) : []) as Awaited<
+      ReturnType<Connection["complete"]>
+    >;
+  }
+
+  /**
+   * Run arglist on the active connection; with none, nothing is
+   * done and no Lisp is started.
+   */
+  async arglist(
+    ...args: Parameters<Connection["arglist"]>
+  ): ReturnType<Connection["arglist"]> {
+    const active = this.active;
+    return (active ? active.arglist(...args) : undefined) as Awaited<
+      ReturnType<Connection["arglist"]>
+    >;
+  }
+
+  /**
+   * Run documentation on the active connection; with none, nothing is
+   * done and no Lisp is started.
+   */
+  async documentation(
+    ...args: Parameters<Connection["documentation"]>
+  ): ReturnType<Connection["documentation"]> {
+    const active = this.active;
+    return (active ? active.documentation(...args) : undefined) as Awaited<
+      ReturnType<Connection["documentation"]>
+    >;
+  }
+
+  /**
+   * Run definitions on the active connection; with none, nothing is
+   * done and no Lisp is started.
+   */
+  async definitions(
+    ...args: Parameters<Connection["definitions"]>
+  ): ReturnType<Connection["definitions"]> {
+    const active = this.active;
+    return (active ? active.definitions(...args) : []) as Awaited<
+      ReturnType<Connection["definitions"]>
+    >;
+  }
+
+  /**
+   * Run xref on the active connection; with none, nothing is
+   * done and no Lisp is started.
+   */
+  async xref(
+    ...args: Parameters<Connection["xref"]>
+  ): ReturnType<Connection["xref"]> {
+    const active = this.active;
+    return (active ? active.xref(...args) : []) as Awaited<
+      ReturnType<Connection["xref"]>
+    >;
+  }
+
+  /**
+   * Run killStickers on the active connection; with none, nothing is
+   * done and no Lisp is started.
+   */
+  async killStickers(
+    ...args: Parameters<Connection["killStickers"]>
+  ): ReturnType<Connection["killStickers"]> {
+    const active = this.active;
+    return (active ? active.killStickers(...args) : undefined) as Awaited<
+      ReturnType<Connection["killStickers"]>
+    >;
+  }
+
+  private async spawn(): Promise<Connection> {
     await this.session.ensure();
-    const slynk = this.slynk ?? (await this.startSlynkProcess());
+    const slynk = await this.startSlynkProcess();
     try {
-      const info = await this.session.request<ConnectionInfo>("ide/connect", {
-        port: slynk.port,
-      });
-      this.info = info;
-      this.emit({ type: "connected", info });
-      return info;
+      return await this.open(
+        "127.0.0.1",
+        slynk.port,
+        "spawned",
+        undefined,
+        slynk,
+      );
     } catch (error) {
-      this.slynk = undefined;
       await slynk.stop();
       throw error;
     }
   }
 
+  private async open(
+    host: string,
+    port: number,
+    origin: Origin,
+    name?: string,
+    slynk?: LispProcess,
+  ): Promise<Connection> {
+    const info = await this.session.request<
+      ConnectionInfo & { connectionId: number }
+    >("ide/connect", { host, port, name });
+    const label =
+      name ??
+      (origin === "spawned"
+        ? `${info.implementation.name ?? "lisp"} (Inferior)`
+        : `${host}:${port}`);
+    const connection = new Connection(
+      info.connectionId,
+      label,
+      origin,
+      host,
+      port,
+      info,
+      (method, params) => this.session.request(method, params),
+    );
+    this.entries.set(connection.id, { connection, slynk });
+    this.emit({ type: "connected", connectionId: connection.id, info });
+    if (this.activeId === undefined) {
+      this.activeId = connection.id;
+      this.emit({ type: "active", connectionId: connection.id });
+    }
+    return connection;
+  }
+
   private async startSlynkProcess(): Promise<LispProcess> {
     const slynk = await startSlynk(await this.slynkLaunch());
-    this.slynk = slynk;
     void slynk.exited.then(() => {
-      if (this.slynk === slynk) {
-        this.slynk = undefined;
-        this.drop("slynk exited");
+      for (const [id, entry] of this.entries) {
+        if (entry.slynk === slynk) {
+          this.drop(id, "slynk exited", false);
+          return;
+        }
       }
     });
     return slynk;
@@ -803,27 +1143,33 @@ export class Ide {
 
   private onNotification(method: string, params: unknown): void {
     if (method === "ide/disconnected") {
-      const reason = text((params as Params | undefined)?.reason);
-      this.drop(reason || "connection closed");
+      const p = (params ?? {}) as Params;
+      this.drop(num(p.connectionId), text(p.reason) || "connection closed");
       return;
     }
     const event = parseNotification(method, params);
     if (event) this.emit(event);
   }
 
+  private dropAll(reason: string): void {
+    for (const id of [...this.entries.keys()]) this.drop(id, reason);
+  }
+
   /**
-   * Forget the connection and report REASON. The slynk process, if
-   * still running, is stopped unless STOP is false.
+   * Forget the connection ID and report REASON. The slynk process, if
+   * VSCLIDE started it and it still runs, is stopped unless STOP is
+   * false. When ID was the active connection, the next one is.
    */
-  private drop(reason: string, stop = true): void {
-    const had = this.info !== undefined;
-    this.info = undefined;
-    if (stop && this.slynk) {
-      const slynk = this.slynk;
-      this.slynk = undefined;
-      void slynk.stop();
+  private drop(id: number, reason: string, stop = true): void {
+    const entry = this.entries.get(id);
+    if (!entry) return;
+    this.entries.delete(id);
+    if (stop && entry.slynk) void entry.slynk.stop();
+    this.emit({ type: "disconnected", connectionId: id, reason });
+    if (this.activeId === id) {
+      this.activeId = this.connections[0]?.id;
+      this.emit({ type: "active", connectionId: this.activeId });
     }
-    if (had) this.emit({ type: "disconnected", reason });
   }
 
   private emit(event: IdeEvent): void {

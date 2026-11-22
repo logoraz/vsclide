@@ -290,13 +290,13 @@ what it is now."
 
 ;;; Registration
 
-(defun register-debugger-methods (ide)
+(defun register-debugger-methods (hub)
   "Register the ide/debug/ methods and the debugger event handlers on
-IDE, a value of REGISTER-IDE-METHODS."
-  (register-event-handler ide :debug #'handle-debug)
-  (register-event-handler ide :debug-activate #'handle-debug-activate)
-  (register-event-handler ide :debug-return #'handle-debug-return)
-  (register-event-handler ide :debug-condition #'handle-debug-condition)
+HUB, a value of REGISTER-IDE-METHODS."
+  (register-event-handler hub :debug #'handle-debug)
+  (register-event-handler hub :debug-activate #'handle-debug-activate)
+  (register-event-handler hub :debug-return #'handle-debug-return)
+  (register-event-handler hub :debug-condition #'handle-debug-condition)
   (loop :for (name function)
           :in `(("ide/debug/backtrace" ,#'backtrace)
                 ("ide/debug/frame" ,#'frame-details)
@@ -309,5 +309,5 @@ IDE, a value of REGISTER-IDE-METHODS."
                 ("ide/debug/returnFrom" ,#'return-from-frame)
                 ("ide/debug/restartFrame" ,#'restart-frame)
                 ("ide/debug/breakOnSignals" ,#'break-on-signals))
-        :do (register-ide-method ide name function))
-  ide)
+        :do (register-ide-method hub name function))
+  hub)

@@ -43,6 +43,17 @@ const LOOKS: Record<Look, vscode.DecorationRenderOptions> = {
   },
 };
 
+/** What one image knows of the stickers. */
+interface ImageStickers {
+  armed: Set<number>;
+  info: Map<number, StickerInfo>;
+  zombies: Set<number>;
+}
+
+function imageStickers(): ImageStickers {
+  return { armed: new Set(), info: new Map(), zombies: new Set() };
+}
+
 /** How long the sticker a debugger stopped at stays lit. */
 const FLASH_MS = 1500;
 
@@ -64,10 +75,35 @@ const FLASH_MS = 1500;
  */
 export class Stickers implements vscode.Disposable, vscode.HoverProvider {
   private readonly stickers = new Map<string, Placed[]>();
-  private readonly armed = new Set<number>();
-  private readonly info = new Map<number, StickerInfo>();
+  /**
+   * What each connection's image knows of the stickers, by connection
+   * id: the armed ones, their recordings, and the deleted ones it still
+   * holds. The editor shows those of the active connection.
+   */
+  private readonly images = new Map<number, ImageStickers>();
+
+  private get image(): ImageStickers {
+    const id = this.ide.active?.id;
+    const known = id === undefined ? undefined : this.images.get(id);
+    if (known) return known;
+    // With no connection nothing is armed; what is written is dropped.
+    const fresh = imageStickers();
+    if (id !== undefined) this.images.set(id, fresh);
+    return fresh;
+  }
+
+  private get armed(): Set<number> {
+    return this.image.armed;
+  }
+
+  private get info(): Map<number, StickerInfo> {
+    return this.image.info;
+  }
+
   /** Stickers deleted here that the image still holds. */
-  private readonly zombies = new Set<number>();
+  private get zombies(): Set<number> {
+    return this.image.zombies;
+  }
   /** Which sticker stands for which breakpoint, by breakpoint id. */
   private readonly breakpointStickers = new Map<string, number>();
   private readonly sites = new Map<number, { uri: vscode.Uri; line: number }>();
@@ -720,9 +756,14 @@ export class Stickers implements vscode.Disposable, vscode.HoverProvider {
     switch (event.type) {
       case "connected":
         // A new image knows none of them.
-        this.armed.clear();
-        this.info.clear();
-        this.zombies.clear();
+        this.images.set(event.connectionId, imageStickers());
+        vscode.window.visibleTextEditors.forEach((e) => this.render(e));
+        break;
+      case "disconnected":
+        this.images.delete(event.connectionId);
+        vscode.window.visibleTextEditors.forEach((e) => this.render(e));
+        break;
+      case "active":
         vscode.window.visibleTextEditors.forEach((e) => this.render(e));
         break;
       case "debugOpen": {

@@ -3,7 +3,8 @@ import { Ide, IdeEvent } from "../base/ide";
 
 /**
  * The status bar item and the vsclide.lispRunning context key, both
- * following the connection of the IDE controller.
+ * following the connections of the IDE controller. The item names the
+ * active connection, and with several open a click switches it.
  */
 export class Status implements vscode.Disposable {
   private readonly item = vscode.window.createStatusBarItem(
@@ -39,28 +40,41 @@ export class Status implements vscode.Disposable {
   }
 
   private update(event: IdeEvent): void {
-    if (event.type === "connected" || event.type === "disconnected") {
+    if (
+      event.type === "connected" ||
+      event.type === "disconnected" ||
+      event.type === "active"
+    ) {
       this.render();
     }
   }
 
-  /** Reflect the state of the connection. */
+  /** Reflect the state of the connections. */
   render(): void {
-    const info = this.ide.connection;
+    const active = this.ide.active;
+    const info = active?.info;
+    const others = this.ide.connections.length - 1;
     void vscode.commands.executeCommand(
       "setContext",
       "vsclide.lispRunning",
       info !== undefined,
     );
-    if (info && this.inDebugger) {
+    if (active && info && this.inDebugger) {
       this.item.text = "$(debug) Lisp: debugging";
       this.item.command = "vsclide.showDebugger";
       this.item.tooltip = "The Lisp is in the debugger; click to show it";
-    } else if (info) {
+    } else if (active && info) {
       const { name, version } = info.implementation;
-      this.item.text = `$(check) ${name ?? "Lisp"} ${version ?? ""}`.trim();
-      this.item.command = "vsclide.disconnect";
-      this.item.tooltip = `Connected to ${name} ${version}; click to stop`;
+      const label = active.origin === "spawned"
+        ? `${name ?? "Lisp"} ${version ?? ""}`.trim()
+        : active.name;
+      this.item.text =
+        `$(check) ${label}` + (others > 0 ? ` +${others}` : "");
+      this.item.command =
+        others > 0 ? "vsclide.switchConnection" : "vsclide.disconnect";
+      this.item.tooltip =
+        `Active connection: ${active.name} (${name} ${version}). ` +
+        (others > 0 ? "Click to switch" : "Click to disconnect");
     } else {
       this.item.text = "$(circle-slash) Lisp: not running";
       this.item.tooltip = "Click to start the Lisp and connect";

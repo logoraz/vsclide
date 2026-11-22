@@ -143,9 +143,9 @@ own table."
 
 ;;; Registration
 
-(defun register-indentation-methods (ide)
-  "Register the indentation method and event handler on IDE, a value of
+(defun register-indentation-methods (hub)
+  "Register the indentation method and event handler on HUB, a value of
 REGISTER-IDE-METHODS."
-  (register-event-handler ide :indentation-update #'handle-indentation-update)
-  (register-ide-method ide "ide/indentation" #'start-indentation)
-  ide)
+  (register-event-handler hub :indentation-update #'handle-indentation-update)
+  (register-ide-method hub "ide/indentation" #'start-indentation)
+  hub)

@@ -220,8 +220,8 @@ referred to, set or specialized, of the kinds asked for."
 
 ;;; Registration
 
-(defun register-language-methods (ide)
-  "Register the language methods on IDE, a value of
+(defun register-language-methods (hub)
+  "Register the language methods on HUB, a value of
 REGISTER-IDE-METHODS."
   (loop :for (name function)
           :in `(("ide/complete" ,#'complete)
@@ -229,5 +229,5 @@ REGISTER-IDE-METHODS."
                 ("ide/documentation" ,#'documentation-text)
                 ("ide/definitions" ,#'definitions)
                 ("ide/xref" ,#'references))
-        :do (register-ide-method ide name function))
-  ide)
+        :do (register-ide-method hub name function))
+  hub)

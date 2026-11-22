@@ -109,7 +109,10 @@ test("an unfinished form does not hang the scan", () => {
 
 test("the image's features arrive as an event", () => {
   assert.deepEqual(
-    parseNotification("ide/features", { features: ["sbcl", 3, "ansi-cl"] }),
-    { type: "features", features: ["sbcl", "ansi-cl"] },
+    parseNotification("ide/features", {
+      connectionId: 2,
+      features: ["sbcl", 3, "ansi-cl"],
+    }),
+    { type: "features", connectionId: 2, features: ["sbcl", "ansi-cl"] },
   );
 });

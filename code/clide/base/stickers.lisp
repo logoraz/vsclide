@@ -253,8 +253,8 @@ the value of one, in the inspector."
 
 ;;; Registration
 
-(defun register-sticker-methods (ide)
-  "Register the ide/stickers/ methods on IDE, a value of
+(defun register-sticker-methods (hub)
+  "Register the ide/stickers/ methods on HUB, a value of
 REGISTER-IDE-METHODS."
   (loop :for (name function)
           :in `(("ide/stickers/compile" ,#'compile-stickered)
@@ -264,5 +264,5 @@ REGISTER-IDE-METHODS."
                 ("ide/stickers/forget" ,#'forget-recordings)
                 ("ide/stickers/toggleBreak" ,#'toggle-break)
                 ("ide/stickers/inspect" ,#'inspect-sticker))
-        :do (register-ide-method ide name function))
-  ide)
+        :do (register-ide-method hub name function))
+  hub)

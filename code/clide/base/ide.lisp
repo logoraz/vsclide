@@ -32,6 +32,7 @@
            ;; For the modules that add methods
            #:ide
            #:ide-server
+           #:ide-id
            #:require-client
            #:find-repl
            #:repl-server-id
@@ -57,9 +58,20 @@
 ;;;
 ;;; The methods registered here are what jekyl calls.  Requests:
 ;;;
-;;;   ide/connect {host?, port}          connect, return implementation info
-;;;                                      and the features of the image
-;;;   ide/disconnect                     drop the connection
+;;; Every request below takes an optional connectionId, the connection it
+;;; is for; left out, it means the only connection, and it is an error
+;;; (invalid params) when several are open.  Every notification carries
+;;; the connectionId of the connection it comes from.
+;;;
+;;;   ide/connect {host?, port, name?, connectionId?}
+;;;                                      open a new connection, return its
+;;;                                      connectionId, implementation info
+;;;                                      and the features of the image;
+;;;                                      with an open connectionId, replace
+;;;                                      that connection
+;;;   ide/disconnect                     drop a connection
+;;;   ide/connections                    {connections: [{connectionId, name,
+;;;                                      host, port}]}
 ;;;   ide/eval {code, package?, debug?}  evaluate, return output and value;
 ;;;                                      with debug, an error enters the
 ;;;                                      debugger and the call returns when
@@ -95,15 +107,31 @@
 (defconstant +slynk-failure+ -32003
   "Slynk could not be reached or refused the request.")
 
-(defstruct (ide (:constructor make-ide (server)))
-  "Everything the IDE methods share: the server to notify, the slynk
-connection and the REPLs open on it."
+(defstruct (hub (:constructor make-hub (server)))
+  "The connections of the IDE: the server to notify, the table of open
+connections by id, and the slynk event handlers they share."
   server
+  (lock (make-lock "clide-hub"))
+  (connections (make-hash-table) :type hash-table)
+  (next-id 1 :type integer)
+  (handlers (make-hash-table) :type hash-table))
+
+(defstruct (ide (:constructor make-ide (hub id name host port)))
+  "One connection: its id and name, where it goes, the slynk client and
+the REPLs open on it.  The IDE methods take one of these."
+  hub
+  id
+  name
+  host
+  port
   (lock (make-lock "clide-ide"))
   (load-lock (make-lock "clide-ide-load"))
   (client nil)
-  (repls (make-hash-table) :type hash-table)
-  (handlers (make-hash-table) :type hash-table))
+  (repls (make-hash-table) :type hash-table))
+
+(defun ide-server (ide)
+  "Return the server that IDE notifies."
+  (hub-server (ide-hub ide)))
 
 (defstruct (repl (:constructor make-repl (server-id thread-id)))
   "A REPL: the slynk channel and thread behind a client side id."
@@ -166,8 +194,10 @@ vector of lower case strings."
                     :collect (json-value feature))))
 
 (defun notify (ide method &rest pairs)
-  "Notify every client of METHOD with an object made from PAIRS."
-  (broadcast (ide-server ide) method (apply #'make-object pairs)))
+  "Notify every client of METHOD with an object made from PAIRS and the
+connectionId of IDE."
+  (broadcast (ide-server ide) method
+             (apply #'make-object "connectionId" (ide-id ide) pairs)))
 
 
 ;;; Connection
@@ -216,26 +246,59 @@ Nobody can answer a debugger yet, and the thread would wait for ever."
                    nil)
                  :thread thread))))
 
+;;; The table of connections
+
+(defun find-connection (hub params)
+  "Return the connection of HUB that PARAMS names by connectionId.  With
+none named it is the only open connection.  Raise +NOT-CONNECTED+ when
+there is none, or the one named is not open, and +INVALID-PARAMS+ when
+several are open and none is named."
+  (let ((id (optional-integer params "connectionId")))
+    (with-lock-held ((hub-lock hub))
+      (let ((table (hub-connections hub)))
+        (cond (id (or (gethash id table)
+                      (raise +not-connected+
+                             (format nil "No connection ~d." id))))
+              ((zerop (hash-table-count table))
+               (raise +not-connected+ "Not connected to slynk."))
+              ((= 1 (hash-table-count table))
+               (loop :for ide :being :the :hash-values :of table
+                     :return ide))
+              (t (raise +invalid-params+
+                        (format nil "connectionId is needed with ~
+                                     several connections."))))))))
+
+(defun forget-connection (ide)
+  "Remove IDE from the table of its hub, and return its client, if any;
+the REPLs go with it."
+  (let ((hub (ide-hub ide)))
+    (with-lock-held ((hub-lock hub))
+      (when (eq ide (gethash (ide-id ide) (hub-connections hub)))
+        (remhash (ide-id ide) (hub-connections hub))))
+    (with-lock-held ((ide-lock ide))
+      (prog1 (ide-client ide)
+        (setf (ide-client ide) nil)
+        (clrhash (ide-repls ide))))))
+
 (defun connection-closed (ide client reason)
-  "Forget CLIENT if it is still the current connection and tell jekyl."
+  "Forget CLIENT if it is still the client of IDE and tell jekyl."
   (let ((current (with-lock-held ((ide-lock ide))
-                   (when (eq client (ide-client ide))
-                     (setf (ide-client ide) nil)
-                     (clrhash (ide-repls ide))
-                     t))))
+                   (eq client (ide-client ide)))))
     (when current
+      (forget-connection ide)
       (notify ide "ide/disconnected" "reason" reason))))
 
-(defun register-event-handler (ide kind function)
-  "Have FUNCTION handle the slynk events of KIND, a keyword.  It is
-called in the reader thread with IDE and the event, and must not block."
-  (setf (gethash kind (ide-handlers ide)) function))
+(defun register-event-handler (hub kind function)
+  "Have FUNCTION handle the slynk events of KIND, a keyword, on every
+connection of HUB.  It is called in the reader thread with the
+connection and the event, and must not block."
+  (setf (gethash kind (hub-handlers hub)) function))
 
 (defun handle-event (ide client event)
-  "Handle a slynk message that belongs to no call or channel.  A
-debugger event that nobody handles is aborted, since the thread that
-entered the debugger would wait for ever."
-  (let ((handler (gethash (first event) (ide-handlers ide))))
+  "Handle a slynk message of the connection IDE that belongs to no call
+or channel.  A debugger event that nobody handles is aborted, since the
+thread that entered the debugger would wait for ever."
+  (let ((handler (gethash (first event) (hub-handlers (ide-hub ide)))))
     (cond (handler (funcall handler ide event))
           ((eq (first event) :closed)
            (connection-closed ide client (second event)))
@@ -249,38 +312,82 @@ entered the debugger would wait for ever."
           (t nil))))
 
 (defun disconnect (ide)
-  "Close the slynk connection of IDE, if any, without a notification."
-  (let ((client (with-lock-held ((ide-lock ide))
-                  (prog1 (ide-client ide)
-                    (setf (ide-client ide) nil)
-                    (clrhash (ide-repls ide))))))
+  "Close the slynk connection IDE and forget it, without a
+notification."
+  (let ((client (forget-connection ide)))
     (when client
       (close-client client))))
 
-(defun connect (ide params)
-  "Handle ide/connect: open a connection and return implementation info."
+(defun new-connection (hub params)
+  "Return a connection for the ide/connect PARAMS: the one named by
+connectionId, closed first, or a new one with the next free id."
   (let ((host (or (optional-string params "host") "127.0.0.1"))
-        (port (required-integer params "port")))
-    (disconnect ide)
-    (let ((client (handler-case
-                      (connect-client
-                       host port
-                       :event-fn (lambda (client event)
-                                   (handle-event ide client event)))
-                    (error (condition)
-                      (raise +slynk-failure+
-                             (format nil "Cannot connect to slynk on ~a:~d: ~a"
-                                     host port condition))))))
-      (handler-case
-          (let ((info (client-call client
-                                   (list (sym "slynk:connection-info")))))
-            (with-lock-held ((ide-lock ide))
-              (setf (ide-client ide) client))
-            (connection-info-object info))
-        (slynk-error (condition)
-          (close-client client)
-          (raise +slynk-failure+
-                 (format nil "Slynk did not answer: ~a" condition)))))))
+        (port (required-integer params "port"))
+        (id (optional-integer params "connectionId")))
+    (let ((old (and id (with-lock-held ((hub-lock hub))
+                         (gethash id (hub-connections hub))))))
+      (when old
+        (disconnect old)))
+    (with-lock-held ((hub-lock hub))
+      (let ((id (or id
+                    (loop :for next := (hub-next-id hub)
+                          :do (incf (hub-next-id hub))
+                          :unless (gethash next (hub-connections hub))
+                            :return next))))
+        (setf (hub-next-id hub) (max (hub-next-id hub) (1+ id)))
+        (make-ide hub id
+                  (or (optional-string params "name")
+                      (format nil "~a:~d" host port))
+                  host port)))))
+
+(defun connect (hub params)
+  "Handle ide/connect: open a connection and return its id and the
+implementation info."
+  (let* ((ide (new-connection hub params))
+         (host (ide-host ide))
+         (port (ide-port ide))
+         (client (handler-case
+                     (connect-client
+                      host port
+                      :event-fn (lambda (client event)
+                                  (handle-event ide client event)))
+                   (error (condition)
+                     (raise +slynk-failure+
+                            (format nil "Cannot connect to slynk on ~a:~d: ~a"
+                                    host port condition))))))
+    (handler-case
+        (let ((info (client-call client
+                                 (list (sym "slynk:connection-info")))))
+          (with-lock-held ((ide-lock ide))
+            (setf (ide-client ide) client))
+          (with-lock-held ((hub-lock hub))
+            (setf (gethash (ide-id ide) (hub-connections hub)) ide))
+          (let ((object (connection-info-object info)))
+            (setf (gethash "connectionId" object) (ide-id ide)
+                  (gethash "name" object) (ide-name ide)
+                  (gethash "host" object) host
+                  (gethash "port" object) port)
+            object))
+      (slynk-error (condition)
+        (close-client client)
+        (raise +slynk-failure+
+               (format nil "Slynk did not answer: ~a" condition))))))
+
+(defun list-connections (hub params)
+  "Handle ide/connections: describe the open connections, by id."
+  (declare (ignore params))
+  (let ((connections
+          (with-lock-held ((hub-lock hub))
+            (loop :for ide :being :the :hash-values :of (hub-connections hub)
+                  :collect ide))))
+    (make-object
+     "connections"
+     (json-array
+      (loop :for ide :in (sort connections #'< :key #'ide-id)
+            :collect (make-object "connectionId" (ide-id ide)
+                                  "name" (ide-name ide)
+                                  "host" (ide-host ide)
+                                  "port" (ide-port ide)))))))
 
 
 ;;; Evaluation
@@ -628,32 +735,31 @@ the package and its nickname; the page gets the new prompt."
 
 ;;; Registration
 
-(defun register-ide-method (ide name function)
-  "Register NAME on the server of IDE; FUNCTION takes IDE and the
-params of a request."
-  (register-method (ide-server ide) name
+(defun register-ide-method (hub name function)
+  "Register NAME on the server of HUB; FUNCTION takes the connection the
+request names, and its params."
+  (register-method (hub-server hub) name
                    (lambda (params)
-                     (funcall function ide params))))
+                     (funcall function (find-connection hub params) params))))
 
 (defun register-ide-methods (server)
-  "Register the ide/ methods on SERVER and return the IDE they share.
-Call this before the server starts."
-  (let ((ide (make-ide server)))
-    (flet ((register (name function)
-             (register-method server name
-                              (lambda (params)
-                                (funcall function ide params)))))
-      (register "ide/connect" #'connect)
-      (register "ide/disconnect"
-                (lambda (ide params)
-                  (declare (ignore params))
-                  (disconnect ide)
-                  nil))
-      (register "ide/eval" #'evaluate)
-      (register "ide/sylvesters" #'sylvesters)
-      (register "ide/repl/create" #'create-repl)
-      (register "ide/repl/send" #'send-to-repl)
-      (register "ide/repl/interrupt" #'interrupt-repl)
-      (register "ide/repl/close" #'close-repl)
-      (register "ide/repl/syncPackage" #'sync-repl-package))
-    ide))
+  "Register the ide/ methods on SERVER and return the HUB of connections
+they share.  Call this before the server starts."
+  (let ((hub (make-hub server)))
+    (register-method server "ide/connect"
+                     (lambda (params) (connect hub params)))
+    (register-method server "ide/connections"
+                     (lambda (params) (list-connections hub params)))
+    (register-ide-method hub "ide/disconnect"
+                         (lambda (ide params)
+                           (declare (ignore params))
+                           (disconnect ide)
+                           nil))
+    (register-ide-method hub "ide/eval" #'evaluate)
+    (register-ide-method hub "ide/sylvesters" #'sylvesters)
+    (register-ide-method hub "ide/repl/create" #'create-repl)
+    (register-ide-method hub "ide/repl/send" #'send-to-repl)
+    (register-ide-method hub "ide/repl/interrupt" #'interrupt-repl)
+    (register-ide-method hub "ide/repl/close" #'close-repl)
+    (register-ide-method hub "ide/repl/syncPackage" #'sync-repl-package)
+    hub))

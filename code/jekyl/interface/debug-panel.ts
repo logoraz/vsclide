@@ -5,9 +5,10 @@ import {
   FRAME_BATCH,
   locationFile,
 } from "../base/debugger";
-import { Ide, IdeEvent } from "../base/ide";
+import { Connection, Ide, IdeEvent } from "../base/ide";
 import { Inspected, InspectorModel } from "../base/inspector";
 import {
+  ConnectionSummary,
   PanelMessage,
   PanelState,
   PanelUi,
@@ -19,16 +20,30 @@ import { locationOffset } from "../lib/source-location";
 /** How many parts of an object are fetched at a time. */
 const PART_BATCH = 100;
 
+/** The debugger and the inspector of one connection. */
+interface Models {
+  debug: DebugModel;
+  inspector: InspectorModel;
+}
+
 /**
  * The debugger and inspector panel: one webview beside the editor with
- * a tab for each. It owns the two models, keeps them up to date from
- * the IDE's events, does what the page asks, and sends the page the
- * whole state after each change. The page only draws.
+ * a tab for each, and a grouped list of the connections, each with its
+ * own debugger and inspector. It owns the models of every connection,
+ * keeps them up to date from the IDE's events, does what the page asks
+ * for the connection shown, and sends the page the whole state after
+ * each change. The page only draws.
  */
 export class DebugPanel implements vscode.Disposable {
   private panel: vscode.WebviewPanel | undefined;
-  private readonly debug = new DebugModel();
-  private readonly inspector = new InspectorModel();
+  private readonly models = new Map<number, Models>();
+  /** Models for when no connection is shown; they never change. */
+  private readonly none: Models = {
+    debug: new DebugModel(),
+    inspector: new InspectorModel(),
+  };
+  /** The connection whose debugger and inspector are shown. */
+  private viewing: number | undefined;
   private readonly ui: PanelUi = {
     tab: "debugger",
     output: undefined,
@@ -48,16 +63,48 @@ export class DebugPanel implements vscode.Disposable {
     private readonly ide: Ide,
     private readonly debugging: (debugging: boolean) => void,
   ) {
-    this.subscriptions.push(
-      ide.onEvent((event) => this.onEvent(event)),
-      this.debug.onChange(() => this.changed()),
-      this.inspector.onChange(() => this.push()),
-    );
+    this.subscriptions.push(ide.onEvent((event) => this.onEvent(event)));
   }
 
-  /** True while the Lisp is in the debugger. */
+  /** The debugger of the connection shown. */
+  private get debug(): DebugModel {
+    return this.shown.debug;
+  }
+
+  /** The inspector of the connection shown. */
+  private get inspector(): InspectorModel {
+    return this.shown.inspector;
+  }
+
+  private get shown(): Models {
+    return this.models.get(this.viewing ?? -1) ?? this.none;
+  }
+
+  /** Return the models of connection ID, made when new. */
+  private modelsOf(id: number): Models {
+    let models = this.models.get(id);
+    if (!models) {
+      models = { debug: new DebugModel(), inspector: new InspectorModel() };
+      this.subscriptions.push(
+        models.debug.onChange(() => this.changed()),
+        models.inspector.onChange(() => this.push()),
+      );
+      this.models.set(id, models);
+    }
+    return models;
+  }
+
+  /** Return the connection whose models are shown, or throw. */
+  private connection(): Connection {
+    const connection =
+      this.ide.get(this.viewing ?? -1) ?? this.ide.active;
+    if (!connection) throw new Error("Not connected to slynk.");
+    return connection;
+  }
+
+  /** True while any Lisp is in the debugger. */
   get isDebugging(): boolean {
-    return this.debug.debugging;
+    return [...this.models.values()].some((m) => m.debug.debugging);
   }
 
   /** Show the panel beside the editor, at TAB if given. */
@@ -77,26 +124,39 @@ export class DebugPanel implements vscode.Disposable {
    */
   async inspectExpression(code: string, packageName?: string): Promise<void> {
     this.packageName = packageName ?? this.packageName;
-    this.show("inspector");
     await this.run(async () => {
+      const connection = await this.ide.connect();
+      this.view(connection.id);
+      this.show("inspector");
       this.ui.output = undefined;
-      this.inspector.start(await this.ide.inspectInit(code, packageName));
+      this.inspector.start(await connection.inspectInit(code, packageName));
     });
   }
 
-  /** Inspect value VALUE of history entry ENTRY of REPL REPLID. */
+  /**
+   * Inspect value VALUE of history entry ENTRY of REPL REPLID of
+   * connection CONNECTIONID.
+   */
   async inspectReplValue(
+    connectionId: number,
     replId: number,
     entry: number,
     value: number,
   ): Promise<void> {
+    this.view(connectionId);
     this.show("inspector");
     await this.run(async () => {
       this.ui.output = undefined;
       this.inspector.start(
-        await this.ide.inspectReplValue(replId, entry, value),
+        await this.connection().inspectReplValue(replId, entry, value),
       );
     });
+  }
+
+  /** Show the debugger and inspector of connection ID. */
+  view(id: number): void {
+    this.modelsOf(id);
+    this.viewing = id;
   }
 
   /**
@@ -117,35 +177,37 @@ export class DebugPanel implements vscode.Disposable {
   /** Use the continue restart of the current level. */
   async continue(): Promise<void> {
     await this.run(() =>
-      this.withLevel((l) => this.ide.debugContinue(l.threadId)),
+      this.withLevel((l) => this.connection().debugContinue(l.threadId)),
     );
   }
 
   /** Return to the previous level of the current thread. */
   async abort(): Promise<void> {
     await this.run(() =>
-      this.withLevel((l) => this.ide.debugAbort(l.threadId)),
+      this.withLevel((l) => this.connection().debugAbort(l.threadId)),
     );
   }
 
   /** Abandon the evaluation that is being debugged. */
   async quit(): Promise<void> {
     await this.run(() =>
-      this.withLevel((l) => this.ide.debugQuit(l.threadId)),
+      this.withLevel((l) => this.connection().debugQuit(l.threadId)),
     );
   }
 
   /** Step into, over or out of the selected frame. */
   async step(kind: "into" | "next" | "out"): Promise<void> {
     await this.run(() =>
-      this.withLevel((l) => this.ide.debugStep(l.threadId, l.selected, kind)),
+      this.withLevel((l) =>
+        this.connection().debugStep(l.threadId, l.selected, kind),
+      ),
     );
   }
 
   /** Toggle *break-on-signals* and say what it is now. */
   async toggleBreakOnSignals(): Promise<void> {
     await this.run(async () => {
-      this.ui.notice = await this.ide.breakOnSignals();
+      this.ui.notice = await this.connection().breakOnSignals();
     });
   }
 
@@ -173,43 +235,86 @@ export class DebugPanel implements vscode.Disposable {
 
   private onEvent(event: IdeEvent): void {
     switch (event.type) {
-      case "debugOpen":
+      case "debugOpen": {
+        // A debugger that opens takes the view, as it needs attention.
+        this.view(event.connectionId);
         this.ui.tab = "debugger";
         this.debug.open(event.level);
         this.show("debugger");
         void this.loadDetails(event.level, event.level.selected);
         break;
+      }
       case "debugActivate":
-        this.debug.activate(event.threadId, event.level);
+        this.modelsOf(event.connectionId).debug.activate(
+          event.threadId,
+          event.level,
+        );
         break;
       case "debugReturn":
-        this.debug.leave(event.threadId, event.level);
+        this.modelsOf(event.connectionId).debug.leave(
+          event.threadId,
+          event.level,
+        );
         break;
       case "debugCondition":
         this.ui.notice = event.message;
         this.push();
         break;
-      case "disconnected":
-        this.debug.clear();
-        this.inspector.clear();
+      case "connected":
+        this.modelsOf(event.connectionId);
+        this.viewing ??= event.connectionId;
+        this.push();
+        break;
+      case "disconnected": {
+        const models = this.models.get(event.connectionId);
+        models?.debug.clear();
+        models?.inspector.clear();
+        this.models.delete(event.connectionId);
+        if (this.viewing === event.connectionId) {
+          this.viewing = this.ide.active?.id;
+        }
         this.ui.output = undefined;
+        this.changed();
+        break;
+      }
+      case "active":
+        this.push();
         break;
       default:
         break;
     }
   }
 
+  /** What the page lists of each connection. */
+  private summaries(): ConnectionSummary[] {
+    return this.ide.connections.map((connection) => {
+      const models = this.models.get(connection.id);
+      return {
+        id: connection.id,
+        name: connection.name,
+        levels: models?.debug.all.length ?? 0,
+        inspecting: models?.inspector.current !== undefined,
+      };
+    });
+  }
+
   /** The debug model changed: tell the page, and the status. */
   private changed(): void {
-    this.debugging(this.debug.debugging);
+    this.debugging(this.isDebugging);
     this.push();
   }
 
   /** Send the page the state, or keep it for when the page is ready. */
   private push(): void {
     if (!this.panel || !this.ready) return;
-    const state: PanelState = panelState(this.debug, this.inspector, this.ui);
-    this.panel.title = this.debug.debugging ? "VSCLIDE (debugging)" : "VSCLIDE";
+    const state: PanelState = panelState(
+      this.debug,
+      this.inspector,
+      this.ui,
+      this.summaries(),
+      this.viewing,
+    );
+    this.panel.title = this.isDebugging ? "VSCLIDE (debugging)" : "VSCLIDE";
     void this.panel.webview.postMessage({ type: "state", state });
   }
 
@@ -237,7 +342,10 @@ export class DebugPanel implements vscode.Disposable {
   private async loadDetails(level: DebugLevel, index: number): Promise<void> {
     if (level.details[index]) return;
     try {
-      const details = await this.ide.debugFrame(level.threadId, index);
+      const details = await this.connection().debugFrame(
+        level.threadId,
+        index,
+      );
       this.debug.setDetails(level.threadId, level.level, index, details);
     } catch (error) {
       this.ui.notice = (error as Error).message;
@@ -279,7 +387,11 @@ export class DebugPanel implements vscode.Disposable {
 
   /** Do what the page asked. */
   private async handle(message: PanelMessage): Promise<void> {
-    const ide = this.ide;
+    if (message.type === "view") {
+      this.view(message.connectionId);
+      this.ui.tab = message.tab;
+      return;
+    }
     const level = this.debug.current;
     const inspected = this.inspector.current;
     switch (message.type) {
@@ -302,46 +414,52 @@ export class DebugPanel implements vscode.Disposable {
       case "inspect":
         this.ui.output = undefined;
         this.inspector.start(
-          await ide.inspectInit(message.code, this.packageName),
+          await this.connection().inspectInit(message.code, this.packageName),
         );
         return;
       case "back":
         this.ui.output = undefined;
-        this.inspector.goBack(await ide.inspectPop());
+        this.inspector.goBack(await this.connection().inspectPop());
         return;
       case "forward":
         this.ui.output = undefined;
-        this.inspector.goForward(await ide.inspectNext());
+        this.inspector.goForward(await this.connection().inspectNext());
         return;
       case "reinspect":
-        this.inspector.refresh(await ide.inspectReinspect());
+        this.inspector.refresh(await this.connection().inspectReinspect());
         return;
       case "verbose":
-        this.inspector.refresh(await ide.inspectToggleVerbose());
+        this.inspector.refresh(await this.connection().inspectToggleVerbose());
         return;
       case "part":
         this.ui.output = undefined;
-        this.inspector.descend(await ide.inspectPart(message.index));
+        this.inspector.descend(
+          await this.connection().inspectPart(message.index),
+        );
         return;
       case "action":
-        this.inspector.refresh(await ide.inspectAction(message.index));
+        this.inspector.refresh(
+          await this.connection().inspectAction(message.index),
+        );
         return;
       case "morePartsOfObject":
         if (inspected) {
           const end = inspected.end;
-          this.inspector.extend(await ide.inspectRange(end, end + PART_BATCH));
+          this.inspector.extend(
+            await this.connection().inspectRange(end, end + PART_BATCH),
+          );
         }
         return;
       case "inspectEval":
         this.ui.output = {
           label: `* ${message.code}`,
-          text: await ide.inspectEval(message.code),
+          text: await this.connection().inspectEval(message.code),
         };
         return;
       case "describe":
         this.ui.output = {
           label: "Describe",
-          text: await ide.inspectDescribe(message.index),
+          text: await this.connection().inspectDescribe(message.index),
         };
         return;
       case "closeInspector":
@@ -360,7 +478,7 @@ export class DebugPanel implements vscode.Disposable {
     message: PanelMessage,
     level: DebugLevel,
   ): Promise<void> {
-    const ide = this.ide;
+    const ide = this.connection();
     const { threadId } = level;
     const frame = level.selected;
     switch (message.type) {
@@ -455,6 +573,8 @@ ${STYLE}
 </style>
 </head>
 <body>
+<div id="sidebar"></div>
+<div id="main">
 <div id="tabs">
   <button id="tab-debugger" class="tab">Debugger</button>
   <button id="tab-inspector" class="tab">Inspector</button>
@@ -527,6 +647,7 @@ ${STYLE}
     </div>
   </div>
 </div>
+</div>
 <script nonce="${nonce}" src="${script}"></script>
 </body>
 </html>`;
@@ -541,10 +662,26 @@ ${STYLE}
 /** The page's style; colors come from the theme. */
 const STYLE = `
   html, body { height: 100%; }
-  body { display: flex; flex-direction: column; margin: 0; padding: 0;
+  body { display: flex; flex-direction: row; margin: 0; padding: 0;
          font-family: var(--vscode-editor-font-family);
          font-size: var(--vscode-editor-font-size);
          color: var(--vscode-editor-foreground); }
+  #main { flex: 1; display: flex; flex-direction: column; min-width: 0;
+          min-height: 0; }
+  #sidebar { display: none; width: 180px; flex-direction: column;
+             overflow-y: auto; border-right: 1px solid
+             var(--vscode-panel-border);
+             font-family: var(--vscode-font-family);
+             font-size: var(--vscode-font-size); }
+  #sidebar.shown { display: flex; }
+  .group-name { padding: 4px 8px 2px; font-weight: bold;
+                color: var(--vscode-descriptionForeground);
+                white-space: nowrap; overflow: hidden;
+                text-overflow: ellipsis; }
+  .entry { padding: 3px 8px 3px 16px; cursor: pointer; }
+  .entry:hover { background: var(--vscode-list-hoverBackground); }
+  .entry.active { background: var(--vscode-list-activeSelectionBackground);
+                  color: var(--vscode-list-activeSelectionForeground); }
   #tabs { display: flex; align-items: center; gap: 2px; padding: 4px 8px 0;
           border-bottom: 1px solid var(--vscode-panel-border); }
   .tab { background: transparent; color: var(--vscode-foreground);

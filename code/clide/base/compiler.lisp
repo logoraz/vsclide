@@ -164,11 +164,11 @@ only compiles; the load is ours, and is skipped when compiling failed."
 
 ;;; Registration
 
-(defun register-compiler-methods (ide)
-  "Register the compiler methods on IDE, a value of
+(defun register-compiler-methods (hub)
+  "Register the compiler methods on HUB, a value of
 REGISTER-IDE-METHODS."
   (loop :for (name function)
           :in `(("ide/compile" ,#'compile-string)
                 ("ide/compileFile" ,#'compile-source-file))
-        :do (register-ide-method ide name function))
-  ide)
+        :do (register-ide-method hub name function))
+  hub)

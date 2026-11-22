@@ -10,9 +10,27 @@ interface VsCodeApi {
 
 declare function acquireVsCodeApi(): VsCodeApi;
 
-/** Messages from the extension; replId is absent for ones to all REPLs. */
+/** Messages from the extension; replId is absent for ones to all REPLs.
+ * A REPL is named by a number of the extension's, and belongs to a group,
+ * a connection. */
 type Incoming =
-  | { type: "add"; replId: number; title: string }
+  | {
+      type: "add";
+      replId: number;
+      title: string;
+      group: number;
+      groupName: string;
+    }
+  | {
+      type: "group";
+      group: number;
+      groupName: string;
+      /** True once the connection has ended; the heading offers to redo it. */
+      ended?: boolean;
+    }
+  | { type: "ungroup"; group: number }
+  | { type: "active"; group?: number }
+  | { type: "multi"; on: boolean }
   | { type: "remove"; replId: number }
   | { type: "select"; replId?: number }
   | { type: "output"; replId: number; text: string; first?: boolean }
@@ -33,6 +51,7 @@ interface ReplValue {
 /** Everything the page keeps for one REPL. */
 interface Repl {
   title: string;
+  group: number;
   transcript: HTMLElement;
   tab: HTMLElement;
   prompt: string;
@@ -52,7 +71,28 @@ const interrupt = document.getElementById("interrupt") as HTMLButtonElement;
 const empty = document.getElementById("empty") as HTMLElement;
 const emptyText = empty.textContent ?? "";
 
+/** A heading in the tab list and the tabs under it, one per connection. */
+interface Group {
+  label: HTMLElement;
+  name: HTMLElement;
+  /** Holds the buttons of a connection that has ended. */
+  actions: HTMLElement;
+  body: HTMLElement;
+}
+
 const repls = new Map<number, Repl>();
+const groups = new Map<number, Group>();
+/** True while several connections are open, so the groups are named. */
+let multi = false;
+/** The group of the active connection, marked in the list. */
+let activeGroup: number | undefined;
+
+/** Mark the heading of the active connection's group. */
+function markGroups(): void {
+  for (const [id, group] of groups) {
+    group.label.classList.toggle("current", id === activeGroup);
+  }
+}
 let active: number | undefined;
 
 /** Append VALUE, which a click inspects, to the transcript of REPL. */
@@ -101,15 +141,89 @@ function select(id: number | undefined): void {
   }
   const repl = active === undefined ? undefined : repls.get(active);
   input.disabled = repl === undefined;
-  empty.style.display = repls.size === 0 ? "block" : "none";
+  empty.style.display = repl === undefined ? "block" : "none";
   promptLabel.textContent = repl?.prompt ?? "";
   input.value = repl?.draft ?? "";
-  tabs.classList.toggle("shown", repls.size > 1);
+  tabs.classList.toggle("shown", repls.size > 1 || multi);
   if (repl) input.focus();
 }
 
-/** Add the tab and transcript of a new REPL. */
-function add(id: number, title: string): void {
+/**
+ * Give the heading of GROUP, number ID, the buttons for a connection that
+ * has ended: connect it again, or drop its dead tabs. ENDED false clears them.
+ */
+function showActions(group: Group, id: number, ended: boolean): void {
+  group.actions.textContent = "";
+  group.label.classList.toggle("ended", ended);
+  if (!ended) return;
+  const buttons: [string, string, "reconnect" | "dismiss"][] = [
+    ["↻", "Reconnect and open a new mREPL", "reconnect"],
+    ["×", "Remove this connection's tabs", "dismiss"],
+  ];
+  for (const [text, title, type] of buttons) {
+    const button = document.createElement("span");
+    button.className = "action";
+    button.textContent = text;
+    button.title = title;
+    button.addEventListener("click", (event) => {
+      event.stopPropagation();
+      vscode.postMessage({ type, group: id });
+    });
+    group.actions.appendChild(button);
+  }
+}
+
+/** Return the chevron of the Explorer's section headers, as an icon. */
+function chevronIcon(): SVGElement {
+  const ns = "http://www.w3.org/2000/svg";
+  const svg = document.createElementNS(ns, "svg");
+  svg.setAttribute("class", "chevron");
+  svg.setAttribute("viewBox", "0 0 16 16");
+  svg.setAttribute("width", "16");
+  svg.setAttribute("height", "16");
+  svg.setAttribute("fill", "currentColor");
+  const path = document.createElementNS(ns, "path");
+  path.setAttribute(
+    "d",
+    "M10.072 8.024L5.715 3.667l.618-.62L11 7.716v.618L6.333 13l-.618-.619 " +
+      "4.357-4.357z",
+  );
+  svg.appendChild(path);
+  return svg;
+}
+
+/**
+ * Return the group GROUP of the tab list, made when new, named NAME. Its
+ * heading is a section header, as the Explorer's: a click folds the
+ * group, and the open ones share the room.
+ */
+function groupOf(group: number, name: string): Group {
+  const known = groups.get(group);
+  if (known) return known;
+  const element = document.createElement("div");
+  element.className = "group";
+  const label = document.createElement("div");
+  label.className = "group-name";
+  const chevron = chevronIcon();
+  const shown = document.createElement("span");
+  shown.className = "name";
+  shown.textContent = name;
+  const actions = document.createElement("span");
+  actions.className = "actions";
+  label.append(chevron, shown, actions);
+  label.addEventListener("click", () => element.classList.toggle("collapsed"));
+  const body = document.createElement("div");
+  body.className = "group-body";
+  element.append(label, body);
+  tabs.appendChild(element);
+  const made = { label, name: shown, actions, body };
+  groups.set(group, made);
+  markGroups();
+  return made;
+}
+
+/** Add the tab and transcript of a new REPL, under its group. */
+function add(id: number, title: string, group: number, name: string): void {
   if (repls.has(id)) return;
   const transcript = document.createElement("div");
   transcript.className = "transcript";
@@ -124,7 +238,7 @@ function add(id: number, title: string): void {
   close.textContent = "×";
   close.title = "Close";
   tab.append(label, close);
-  tabs.appendChild(tab);
+  groupOf(group, name).body.appendChild(tab);
   tab.addEventListener("click", () => {
     select(id);
     vscode.postMessage({ type: "select", replId: id });
@@ -136,6 +250,7 @@ function add(id: number, title: string): void {
 
   repls.set(id, {
     title,
+    group,
     transcript,
     tab,
     prompt: "CL-USER>",
@@ -154,6 +269,11 @@ function remove(id: number): void {
   repl.transcript.remove();
   repl.tab.remove();
   repls.delete(id);
+  const group = groups.get(repl.group);
+  if (group && group.body.childElementCount === 0) {
+    group.body.parentElement?.remove();
+    groups.delete(repl.group);
+  }
   if (active === id) active = undefined;
 }
 
@@ -217,8 +337,31 @@ window.addEventListener("message", (event: MessageEvent<Incoming>) => {
   const message = event.data;
   switch (message.type) {
     case "add":
-      add(message.replId, message.title);
+      add(message.replId, message.title, message.group, message.groupName);
       break;
+    case "active":
+      activeGroup = message.group;
+      markGroups();
+      break;
+    case "multi":
+      multi = message.on;
+      tabs.classList.toggle("shown", repls.size > 1 || multi);
+      break;
+    case "group": {
+      // A connection has its heading from the start, REPL or none.
+      const group = groupOf(message.group, message.groupName);
+      group.name.textContent = message.groupName;
+      showActions(group, message.group, message.ended === true);
+      break;
+    }
+    case "ungroup": {
+      const group = groups.get(message.group);
+      if (group && group.body.childElementCount === 0) {
+        group.body.parentElement?.remove();
+        groups.delete(message.group);
+      }
+      break;
+    }
     case "remove":
       remove(message.replId);
       break;

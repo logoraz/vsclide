@@ -197,7 +197,23 @@ export function toLiveRules(value: unknown): LiveRule[] {
  * their file is loaded and the table is refreshed.
  */
 export class IndentRules {
-  private readonly live = new Map<string, LiveRule[]>();
+  /** What each connection's Lisp has said, by connection id. */
+  private readonly lives = new Map<number, Map<string, LiveRule[]>>();
+  private selected = 0;
+
+  /** The rules of the selected connection. */
+  private get live(): Map<string, LiveRule[]> {
+    return this.of(this.selected);
+  }
+
+  private of(id: number): Map<string, LiveRule[]> {
+    let rules = this.lives.get(id);
+    if (!rules) {
+      rules = new Map();
+      this.lives.set(id, rules);
+    }
+    return rules;
+  }
 
   /**
    * CURRENT names the package of the file being indented, used to pick
@@ -207,10 +223,23 @@ export class IndentRules {
     private readonly current: () => string | undefined = () => undefined,
   ) {}
 
-  /** Take RULES from the Lisp; a symbol seen again is replaced. */
-  update(rules: LiveRule[]): void {
+  /**
+   * Use the rules of connection ID from now on; undefined selects none,
+   * so the table alone applies. A tool with a single image never calls
+   * this, and its rules are those of id 0.
+   */
+  select(id: number | undefined): void {
+    this.selected = id ?? -1;
+  }
+
+  /**
+   * Take RULES from the Lisp of connection ID, the selected one if not
+   * given; a symbol seen again is replaced.
+   */
+  update(rules: LiveRule[], id: number = this.selected): void {
+    const live = this.of(id);
     for (const rule of rules) {
-      const known = this.live.get(rule.name) ?? [];
+      const known = live.get(rule.name) ?? [];
       const same = known.findIndex(
         (other) => JSON.stringify(other.spec) === JSON.stringify(rule.spec),
       );
@@ -219,13 +248,16 @@ export class IndentRules {
       } else {
         known.push(rule);
       }
-      this.live.set(rule.name, known);
+      live.set(rule.name, known);
     }
   }
 
-  /** Forget everything the Lisp has said, for instance on reconnect. */
-  clear(): void {
-    this.live.clear();
+  /**
+   * Forget everything the Lisp of connection ID, the selected one if
+   * not given, has said, for instance on reconnect.
+   */
+  clear(id: number = this.selected): void {
+    this.lives.delete(id);
   }
 
   /** Return whether the Lisp has given a rule for NAME, as written. */

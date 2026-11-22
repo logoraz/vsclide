@@ -1,7 +1,7 @@
 import * as vscode from "vscode";
 import { ReplPackage, needsPackageSync } from "../lib/package-sync";
 import { problemText } from "../lib/problem";
-import { Ide, IdeEvent } from "../base/ide";
+import { Connection, Ide, IdeEvent, Origin } from "../base/ide";
 import { banner } from "../lib/sylvester";
 
 /** Id of the webview view, as contributed in package.json. */
@@ -13,25 +13,54 @@ type Outgoing =
   | { type: "send"; replId: number; text: string }
   | { type: "interrupt"; replId: number }
   | { type: "select"; replId: number }
+  | { type: "reconnect"; group: number }
+  | { type: "dismiss"; group: number }
+
   | { type: "close"; replId: number }
   | { type: "inspect"; replId: number; entry: number; value: number };
+
+/** What is needed to connect again to a connection that has ended. */
+interface Endpoint {
+  name: string;
+  origin: Origin;
+  host: string;
+  port: number;
+}
+
+/** A REPL of the panel: which connection it is on, and its id there. */
+interface ReplTab {
+  connectionId: number;
+  replId: number;
+  title: string;
+}
 
 /**
  * The mREPL panel: a webview view in the bottom panel that holds any
  * number of Lisp REPLs, each a tab in a list on the right as in the
- * terminal. The page only draws; the REPLs live in slynk and are
- * driven through the IDE controller.
+ * terminal, grouped under the connection it is on. The page only
+ * draws; the REPLs live in slynk and are driven through the IDE
+ * controller. The page names a REPL by a number of its own, as REPL
+ * ids repeat from one connection to the next.
  */
 export class ReplView implements vscode.WebviewViewProvider {
   private view: vscode.WebviewView | undefined;
-  /** Titles of the open REPLs by id, in creation order. */
-  private readonly repls = new Map<number, string>();
+  /** The open REPLs by the page's number, in creation order. */
+  private readonly repls = new Map<number, ReplTab>();
+  private nextTab = 1;
   private active: number | undefined;
+  /** The tab last used on each connection, by connection id. */
+  private readonly lastTab = new Map<number, number>();
   private readonly packages = new Map<number, ReplPackage>();
   private readonly busy = new Set<number>();
-  private counter = 0;
+  /** Where each connection that has had a heading here connected to. */
+  private readonly endpoints = new Map<number, Endpoint>();
+  /** The names of the connections that have had a REPL here. */
+  private readonly names = new Map<number, string>();
+  /** REPLs opened so far on each connection, for the titles. */
+  private readonly counters = new Map<number, number>();
   private creating: Promise<void> = Promise.resolve();
-  private adopting = false;
+  /** The connection a REPL is being created on, or undefined. */
+  private adopting: number | undefined;
   private sylvesters: string | undefined | null = null;
   private banner = "";
   /** False until the page has loaded; messages wait in QUEUE. */
@@ -48,6 +77,7 @@ export class ReplView implements vscode.WebviewViewProvider {
     private readonly extension: vscode.Uri,
     private readonly ide: Ide,
     private readonly inspect: (
+      connectionId: number,
       replId: number,
       entry: number,
       value: number,
@@ -113,15 +143,18 @@ export class ReplView implements vscode.WebviewViewProvider {
       .getConfiguration("vsclide")
       .get<boolean>("repl.syncPackage", true);
     const id = this.active;
-    if (!enabled || id === undefined || !this.ide.connected) return;
+    const tab = id === undefined ? undefined : this.repls.get(id);
+    if (!enabled || id === undefined || !tab) return;
+    const connection = this.ide.get(tab.connectionId);
     const wanted = packageName;
     if (
+      !connection ||
       !wanted ||
       !needsPackageSync(this.packages.get(id), wanted, this.busy.has(id))
     ) {
       return;
     }
-    this.ide.syncReplPackage(id, wanted).catch(() => undefined);
+    connection.syncReplPackage(tab.replId, wanted).catch(() => undefined);
   }
 
   /** Close the active REPL. */
@@ -140,15 +173,18 @@ export class ReplView implements vscode.WebviewViewProvider {
         preserveFocus: true,
       });
       this.post({ type: "problem" });
-      this.adopting = true;
       // Connect first, so a start that fails fails once and is reported.
-      await this.ide.connect();
+      // The REPL goes to the active connection.
+      const connection = await this.ide.connect();
+      this.adopting = connection.id;
       const art = vscode.workspace
         .getConfiguration("vsclide")
         .get<boolean>("repl.sylvester", true);
-      this.banner = banner(art ? await this.sylvesterText() : undefined);
-      const id = await this.ide.createRepl();
-      this.adopt(id);
+      this.banner = banner(
+        art ? await this.sylvesterText(connection) : undefined,
+      );
+      const id = await connection.createRepl();
+      this.adopt(connection, id);
     } catch (error) {
       this.log(`vsclide: could not start a REPL: ${(error as Error).message}`);
       this.post(
@@ -157,47 +193,182 @@ export class ReplView implements vscode.WebviewViewProvider {
           : { type: "notice", text: problemText(error) },
       );
     } finally {
-      this.adopting = false;
+      this.adopting = undefined;
     }
   }
 
-  /** Fetch sylvesters.txt once; absence is remembered too. */
-  private async sylvesterText(): Promise<string | undefined> {
+  /**
+   * Fetch sylvesters.txt once, from the first image asked; absence is
+   * remembered too.
+   */
+  private async sylvesterText(
+    connection: Connection,
+  ): Promise<string | undefined> {
     if (this.sylvesters === null) {
-      this.sylvesters = await this.ide.sylvesters().catch(() => undefined);
+      this.sylvesters = await connection.sylvesters().catch(() => undefined);
     }
     return this.sylvesters;
   }
 
   private async close(id: number): Promise<void> {
-    if (!this.repls.delete(id)) return;
+    const tab = this.repls.get(id);
+    if (!tab) return;
+    this.repls.delete(id);
     this.packages.delete(id);
     this.busy.delete(id);
     this.announced.delete(id);
     this.post({ type: "remove", replId: id });
     if (this.active === id) this.active = [...this.repls.keys()].pop();
     this.post({ type: "select", replId: this.active });
-    await this.ide.closeRepl(id).catch(() => undefined);
+    await this.ide
+      .get(tab.connectionId)
+      ?.closeRepl(tab.replId)
+      .catch(() => undefined);
   }
 
-  /** Record REPL ID as open, add its tab and make it the active one. */
-  private adopt(id: number): void {
-    if (this.repls.has(id)) return;
-    const title = `mREPL ${++this.counter}`;
-    this.repls.set(id, title);
+  /** Note that tab ID is the one last used on its connection. */
+  private remember(id: number): void {
+    const tab = this.repls.get(id);
+    if (tab) this.lastTab.set(tab.connectionId, id);
+  }
+
+  /**
+   * The active connection changed: show its REPL, the one last used or
+   * else the newest, or say that it has none yet.
+   */
+  private followActive(): void {
+    const id = this.ide.active?.id;
+    this.post({ type: "active", group: id });
+    if (id === undefined) return;
+    let tab = this.lastTab.get(id);
+    if (tab === undefined || !this.repls.has(tab)) {
+      tab = [...this.repls]
+        .filter(([, other]) => other.connectionId === id)
+        .map(([number]) => number)
+        .pop();
+    }
+    this.active = tab;
+    this.post({
+      type: "problem",
+      text:
+        tab === undefined
+          ? `No mREPL on ${this.groupName(id)}. Use + above.`
+          : undefined,
+    });
+    this.post({ type: "select", replId: tab });
+  }
+
+  /** Give connection ID its heading in the page, with or without REPLs. */
+  private announceGroup(id: number): void {
+    const connection = this.ide.get(id);
+    if (connection) {
+      this.endpoints.set(id, {
+        name: connection.name,
+        origin: connection.origin,
+        host: connection.host,
+        port: connection.port,
+      });
+    }
+    this.post({ type: "group", group: id, groupName: this.groupName(id) });
+  }
+
+  /**
+   * Connect again to what connection ID was, the Lisp VSCLIDE owns or
+   * the slynk it attached to, drop the dead tabs and open a REPL on the
+   * new connection. The old REPLs cannot come back: they lived in the
+   * connection that ended.
+   */
+  private async reconnect(id: number): Promise<void> {
+    const was = this.endpoints.get(id);
+    if (!was) return;
+    let connection: Connection;
+    try {
+      connection =
+        was.origin === "spawned"
+          ? await this.ide.start()
+          : await this.ide.attach(was.host, was.port, was.name);
+    } catch (error) {
+      void vscode.window.showErrorMessage(
+        `VSCLIDE: could not reconnect to ${was.name}: ` +
+          (error as Error).message,
+      );
+      return;
+    }
+    this.dropGroup(id);
+    this.ide.setActive(connection.id);
+    await this.create();
+  }
+
+  /** Remove the tabs and the heading of the ended connection ID. */
+  private dropGroup(id: number): void {
+    for (const [tabId, tab] of [...this.repls]) {
+      if (tab.connectionId !== id) continue;
+      this.repls.delete(tabId);
+      this.packages.delete(tabId);
+      this.busy.delete(tabId);
+      this.announced.delete(tabId);
+      this.post({ type: "remove", replId: tabId });
+    }
+    this.lastTab.delete(id);
+    this.endpoints.delete(id);
+    this.post({ type: "ungroup", group: id });
+    if (this.active !== undefined && !this.repls.has(this.active)) {
+      this.active = [...this.repls.keys()].pop();
+      this.post({ type: "select", replId: this.active });
+    }
+  }
+
+  /** Tell the page whether several connections are open. */
+  private announceMulti(): void {
+    this.post({ type: "multi", on: this.ide.connections.length > 1 });
+  }
+
+  /** Return the page's number for REPL REPLID of CONNECTIONID, if open. */
+  private find(connectionId: number, replId: number): number | undefined {
+    for (const [id, tab] of this.repls) {
+      if (tab.connectionId === connectionId && tab.replId === replId) {
+        return id;
+      }
+    }
+    return undefined;
+  }
+
+  /**
+   * Record REPL REPLID of CONNECTION as open, add its tab and make it
+   * the active one. Return the page's number for it.
+   */
+  private adopt(connection: Connection, replId: number): number {
+    const known = this.find(connection.id, replId);
+    if (known !== undefined) return known;
+    const count = (this.counters.get(connection.id) ?? 0) + 1;
+    this.counters.set(connection.id, count);
+    const id = this.nextTab++;
+    this.repls.set(id, {
+      connectionId: connection.id,
+      replId,
+      title: `mREPL ${count}`,
+    });
     this.active = id;
+    this.remember(id);
     this.announce(id);
     // The banner comes before anything slynk has said for this REPL.
     this.post({ type: "output", replId: id, text: this.banner, first: true });
     this.banner = "";
+    return id;
   }
 
   /** Tell the page about REPL ID, once. */
   private announce(id: number): void {
-    const title = this.repls.get(id);
-    if (title === undefined || this.announced.has(id)) return;
+    const tab = this.repls.get(id);
+    if (tab === undefined || this.announced.has(id)) return;
     this.announced.add(id);
-    this.post({ type: "add", replId: id, title });
+    this.post({
+      type: "add",
+      replId: id,
+      title: tab.title,
+      group: tab.connectionId,
+      groupName: this.groupName(tab.connectionId),
+    });
   }
 
   private async onMessage(message: Outgoing): Promise<void> {
@@ -206,22 +377,47 @@ export class ReplView implements vscode.WebviewViewProvider {
         case "ready":
           this.flush();
           break;
-        case "send":
+        case "send": {
+          const tab = this.repls.get(message.replId);
+          if (!tab) break;
           this.busy.add(message.replId);
-          await this.ide.sendToRepl(message.replId, message.text);
+          await this.connectionOf(tab).sendToRepl(tab.replId, message.text);
           break;
-        case "interrupt":
-          await this.ide.interruptRepl(message.replId);
+        }
+        case "interrupt": {
+          const tab = this.repls.get(message.replId);
+          if (tab) await this.connectionOf(tab).interruptRepl(tab.replId);
           break;
-        case "select":
+        }
+        case "reconnect":
+          await this.reconnect(message.group);
+          break;
+        case "dismiss":
+          this.dropGroup(message.group);
+          break;
+        case "select": {
           this.active = message.replId;
+          this.remember(message.replId);
+          // The REPL chosen is the connection the editor uses too.
+          const tab = this.repls.get(message.replId);
+          if (tab) this.ide.setActive(tab.connectionId);
           break;
+        }
         case "close":
           await this.close(message.replId);
           break;
-        case "inspect":
-          await this.inspect(message.replId, message.entry, message.value);
+        case "inspect": {
+          const tab = this.repls.get(message.replId);
+          if (tab) {
+            await this.inspect(
+              tab.connectionId,
+              tab.replId,
+              message.entry,
+              message.value,
+            );
+          }
           break;
+        }
       }
     } catch (error) {
       this.post({
@@ -230,6 +426,13 @@ export class ReplView implements vscode.WebviewViewProvider {
         text: (error as Error).message,
       });
     }
+  }
+
+  /** Return the connection TAB is on, or throw when it has gone. */
+  private connectionOf(tab: ReplTab): Connection {
+    const connection = this.ide.get(tab.connectionId);
+    if (!connection) throw new Error("This REPL's connection has ended.");
+    return connection;
   }
 
   /**
@@ -242,6 +445,11 @@ export class ReplView implements vscode.WebviewViewProvider {
     this.queue = [];
     for (const message of queued) void this.view?.webview.postMessage(message);
     for (const id of this.repls.keys()) this.announce(id);
+    this.announceMulti();
+    for (const connection of this.ide.connections) {
+      this.announceGroup(connection.id);
+    }
+    this.post({ type: "active", group: this.ide.active?.id });
     this.post({ type: "select", replId: this.active });
   }
 
@@ -254,29 +462,53 @@ export class ReplView implements vscode.WebviewViewProvider {
     const enabled = vscode.workspace
       .getConfiguration("vsclide")
       .get<boolean>("repl.openOnConnect", false);
-    if (!enabled || this.adopting || this.repls.size > 0) return;
+    if (!enabled || this.adopting !== undefined || this.repls.size > 0) {
+      return;
+    }
     await this.create();
   }
 
   private onEvent(event: IdeEvent): void {
+    if (event.type === "active") {
+      this.followActive();
+      return;
+    }
     if (event.type === "connected") {
+      this.announceGroup(event.connectionId);
+      this.announceMulti();
       void this.openOnConnect();
       return;
     }
     if (event.type === "disconnected") {
+      this.announceMulti();
       const text = `Disconnected: ${event.reason}. Close this tab and open ` +
         "a new mREPL.";
-      for (const replId of this.repls.keys()) {
+      for (const [replId, tab] of this.repls) {
+        if (tab.connectionId !== event.connectionId) continue;
         this.post({ type: "notice", replId, text });
       }
+      const has = [...this.repls.values()].some(
+        (tab) => tab.connectionId === event.connectionId,
+      );
+      this.post(
+        has
+          ? {
+              type: "group",
+              group: event.connectionId,
+              groupName: this.groupName(event.connectionId),
+              ended: true,
+            }
+          : { type: "ungroup", group: event.connectionId },
+      );
       return;
     }
     if (!("replId" in event)) return;
-    if (!this.repls.has(event.replId)) {
-      if (!this.adopting) return;
-      this.adopt(event.replId);
+    let replId = this.find(event.connectionId, event.replId);
+    if (replId === undefined) {
+      const connection = this.ide.get(event.connectionId);
+      if (this.adopting !== event.connectionId || !connection) return;
+      replId = this.adopt(connection, event.replId);
     }
-    const replId = event.replId;
     switch (event.type) {
       case "replOutput":
         this.post({ type: "output", replId, text: event.text });
@@ -309,6 +541,17 @@ export class ReplView implements vscode.WebviewViewProvider {
       default:
         break;
     }
+  }
+
+  /**
+   * Return the name the page shows for connection ID, kept after the
+   * connection has gone, as its tabs stay.
+   */
+  private groupName(id: number): string {
+    const name = this.ide.get(id)?.name ?? this.names.get(id);
+    const shown = name ?? `connection ${id}`;
+    this.names.set(id, shown);
+    return shown;
   }
 
   private post(message: unknown): void {
@@ -365,6 +608,29 @@ export class ReplView implements vscode.WebviewViewProvider {
           overflow-y: auto; font-family: var(--vscode-font-family);
           font-size: var(--vscode-font-size); }
   #tabs.shown { display: flex; }
+  .group { display: flex; flex-direction: column; flex: 1 1 auto;
+           min-height: 0; border-top: 1px solid
+           var(--vscode-sideBarSectionHeader-border,
+               var(--vscode-panel-border)); }
+  .group.collapsed { flex: 0 0 auto; }
+  .group.collapsed .group-body { display: none; }
+  .group-body { overflow-y: auto; min-height: 0; }
+  .group-name { display: flex; gap: 4px; padding: 3px 8px; cursor: pointer;
+                font-size: 11px; font-weight: bold; text-transform: uppercase;
+                color: var(--vscode-sideBarSectionHeader-foreground,
+                           var(--vscode-foreground));
+                background: var(--vscode-sideBarSectionHeader-background,
+                                transparent);
+                white-space: nowrap; overflow: hidden; }
+  .group-name .name { overflow: hidden; text-overflow: ellipsis; flex: 1; }
+  .group-name .actions { display: flex; gap: 6px; }
+  .group-name .action { padding: 0 2px; }
+  .group-name .action:hover {
+    background: var(--vscode-toolbar-hoverBackground); }
+  .group-name .chevron { flex: none; transition: transform 0.1s; }
+  .group:not(.collapsed) .chevron { transform: rotate(90deg); }
+  .group-name.ended .name { opacity: 0.5; }
+  .group-name.current .name::before { content: "\\25cf\\a0"; }
   .tab { display: flex; align-items: center; justify-content: space-between;
          padding: 3px 8px; cursor: pointer; }
   .tab:hover { background: var(--vscode-list-hoverBackground); }

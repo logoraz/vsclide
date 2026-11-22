@@ -236,8 +236,8 @@ REPL."
                      (required-integer params "value"))
            :thread (repl-thread-id repl)))))
 
-(defun register-inspector-methods (ide)
-  "Register the ide/inspect/ methods on IDE, a value of
+(defun register-inspector-methods (hub)
+  "Register the ide/inspect/ methods on HUB, a value of
 REGISTER-IDE-METHODS."
   (loop :for (name function)
           :in `(("ide/inspect/init" ,#'init-inspector)
@@ -255,5 +255,5 @@ REGISTER-IDE-METHODS."
                 ("ide/inspect/frameVar" ,#'inspect-frame-var)
                 ("ide/inspect/condition" ,#'inspect-condition)
                 ("ide/inspect/replValue" ,#'inspect-repl-value))
-        :do (register-ide-method ide name function))
-  ide)
+        :do (register-ide-method hub name function))
+  hub)

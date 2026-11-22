@@ -104,7 +104,9 @@ your own `keybindings.json` if wanted.
 | Command                   | ID                             |
 | ------------------------- | ------------------------------ |
 | Connect                   | `vsclide.connect`              |
-| Disconnect and Stop Lisp  | `vsclide.disconnect`           |
+| Connect to Running Slynk  | `vsclide.connectToSlynk`       |
+| Switch Connection         | `vsclide.switchConnection`     |
+| Disconnect                | `vsclide.disconnect`           |
 | Restart Lisp              | `vsclide.restart`              |
 | Clear Compiler Notes      | `vsclide.clearNotes`           |
 | Show Output               | `vsclide.showOutput`           |

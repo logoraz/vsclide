@@ -18,8 +18,22 @@ export interface PanelUi {
   notice: string | undefined;
 }
 
+/** What the page lists of a connection, in its grouped list. */
+export interface ConnectionSummary {
+  id: number;
+  name: string;
+  /** How many debugger levels are open on it. */
+  levels: number;
+  /** Whether an object is being inspected on it. */
+  inspecting: boolean;
+}
+
 /** Everything the page needs to draw itself. */
 export interface PanelState {
+  /** The connections, grouped in the page's list; one hides the list. */
+  connections: ConnectionSummary[];
+  /** The connection whose debugger and inspector the page shows. */
+  viewing: number | undefined;
   tab: Tab;
   notice: string | undefined;
   debug: {
@@ -40,9 +54,13 @@ export function panelState(
   debug: DebugModel,
   inspector: InspectorModel,
   ui: PanelUi,
+  connections: ConnectionSummary[] = [],
+  viewing?: number,
 ): PanelState {
   const current = debug.current;
   return {
+    connections,
+    viewing,
     tab: ui.tab,
     notice: ui.notice,
     debug: {
@@ -65,6 +83,7 @@ export function panelState(
 export type PanelMessage =
   | { type: "ready" }
   | { type: "tab"; tab: Tab }
+  | { type: "view"; connectionId: number; tab: Tab }
   | { type: "restart"; index: number }
   | { type: "abort" }
   | { type: "quit" }

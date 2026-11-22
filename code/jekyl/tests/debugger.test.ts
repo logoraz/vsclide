@@ -146,20 +146,32 @@ test("notifications become debugger events", () => {
   assert.equal(opened?.type, "debugOpen");
   assert.deepEqual(
     parseNotification("ide/debug/return", {
+      connectionId: 5,
       threadId: 3,
       level: 1,
       stepping: true,
     }),
-    { type: "debugReturn", threadId: 3, level: 1, stepping: true },
+    {
+      type: "debugReturn",
+      connectionId: 5,
+      threadId: 3,
+      level: 1,
+      stepping: true,
+    },
   );
   assert.deepEqual(
-    parseNotification("ide/debug/activate", { threadId: 3, level: 2 }),
-    { type: "debugActivate", threadId: 3, level: 2 },
+    parseNotification("ide/debug/activate", {
+      connectionId: 5,
+      threadId: 3,
+      level: 2,
+    }),
+    { type: "debugActivate", connectionId: 5, threadId: 3, level: 2 },
   );
 });
 
 test("REPL values name their entry and their place in it", () => {
   const event = parseNotification("ide/repl/values", {
+    connectionId: 5,
     replId: 2,
     values: [
       { text: "1", index: 4, value: 0 },
@@ -168,12 +180,24 @@ test("REPL values name their entry and their place in it", () => {
   });
   assert.deepEqual(event, {
     type: "replValues",
+    connectionId: 5,
     replId: 2,
     values: [
       { text: "1", index: 4, value: 0 },
       { text: "2", index: 4, value: 1 },
     ],
   });
+});
+
+test("an event names the connection it comes from", () => {
+  assert.deepEqual(
+    parseNotification("ide/repl/output", {
+      connectionId: 2,
+      replId: 1,
+      text: "hi",
+    }),
+    { type: "replOutput", connectionId: 2, replId: 1, text: "hi" },
+  );
 });
 
 /** Return the headline of a level stopped at the sticker stop STOP. */
