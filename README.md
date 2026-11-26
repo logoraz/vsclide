@@ -2,7 +2,7 @@
 
 A full-powered Common Lisp IDE for VS Code.
 
-> **Status:** early development, version 0.1.0. Install it from a VSIX
+> **Status:** early development, version 0.2.0. Install it from a VSIX
 > you build yourself (below); there is no marketplace release yet.
 
 <p align="center">
