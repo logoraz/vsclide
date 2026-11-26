@@ -145,6 +145,15 @@ async function pickConnection(
   return picked?.connection;
 }
 
+/** Pick a connection, and open an mREPL on it. */
+async function newReplOn(context: CommandContext): Promise<void> {
+  const connection = await pickConnection(
+    context,
+    "Open an mREPL on which connection?",
+  );
+  if (connection) await context.repl.create(connection);
+}
+
 /** Ask for a running slynk server and attach to it, as sly-connect. */
 async function connectToSlynk(context: CommandContext): Promise<void> {
   const text = await vscode.window.showInputBox({
@@ -442,6 +451,7 @@ export function registerCommands(
       guarded(context, () => context.repl.toggle()),
     ),
     register("newRepl", () => guarded(context, () => context.repl.create())),
+    register("newReplOn", () => guarded(context, () => newReplOn(context))),
     register("closeRepl", () =>
       guarded(context, () => context.repl.closeActive()),
     ),

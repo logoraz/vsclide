@@ -2,7 +2,7 @@
   "name": "vsclide",
   "displayName": ":VSCLIDE",
   "description": "A full-powered Common Lisp IDE for VS Code.",
-  "version": "0.1.1",
+  "version": "0.2.0",
   "publisher": "logoraz",
   "license": "MIT",
   "repository": {
@@ -111,6 +111,11 @@
         "command": "vsclide.newRepl",
         "title": "VSCLIDE: New mREPL",
         "icon": "$(add)"
+      },
+      {
+        "command": "vsclide.newReplOn",
+        "title": "VSCLIDE: New mREPL on Connection...",
+        "icon": "$(chevron-down)"
       },
       {
         "command": "vsclide.closeRepl",
@@ -591,14 +596,19 @@
           "group": "navigation@1"
         },
         {
+          "command": "vsclide.newReplOn",
+          "when": "view == vsclide.mrepl && vsclide.severalConnections",
+          "group": "navigation@2"
+        },
+        {
           "command": "vsclide.clearRepl",
           "when": "view == vsclide.mrepl",
-          "group": "navigation@2"
+          "group": "navigation@3"
         },
         {
           "command": "vsclide.closeRepl",
           "when": "view == vsclide.mrepl",
-          "group": "navigation@3"
+          "group": "navigation@4"
         }
       ]
     },

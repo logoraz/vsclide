@@ -111,6 +111,7 @@ your own `keybindings.json` if wanted.
 | Clear Compiler Notes      | `vsclide.clearNotes`           |
 | Show Output               | `vsclide.showOutput`           |
 | New mREPL                 | `vsclide.newRepl`              |
+| New mREPL on Connection   | `vsclide.newReplOn`            |
 | Close mREPL               | `vsclide.closeRepl`            |
 | Clear mREPL               | `vsclide.clearRepl`            |
 | Show Inspector            | `vsclide.showInspector`        |

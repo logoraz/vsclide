@@ -123,11 +123,14 @@ export class ReplView implements vscode.WebviewViewProvider {
     }
   }
 
-  /** Open a new REPL and make it the active tab. */
-  create(): Promise<void> {
+  /**
+   * Open a new REPL and make it the active tab, on CONNECTION when given
+   * (which then becomes the active connection), else on the active one.
+   */
+  create(connection?: Connection): Promise<void> {
     // One creation at a time: a REPL's first events can arrive before
     // the reply that names it, and are then adopted by the open one.
-    this.creating = this.creating.then(() => this.createOne());
+    this.creating = this.creating.then(() => this.createOne(connection));
     return this.creating;
   }
 
@@ -167,7 +170,7 @@ export class ReplView implements vscode.WebviewViewProvider {
     this.post({ type: "clear", replId: this.active });
   }
 
-  private async createOne(): Promise<void> {
+  private async createOne(chosen?: Connection): Promise<void> {
     try {
       await vscode.commands.executeCommand(`${VIEW_ID}.focus`, {
         preserveFocus: true,
@@ -175,7 +178,7 @@ export class ReplView implements vscode.WebviewViewProvider {
       this.post({ type: "problem" });
       // Connect first, so a start that fails fails once and is reported.
       // The REPL goes to the active connection.
-      const connection = await this.ide.connect();
+      const connection = chosen ?? (await this.ide.connect());
       this.adopting = connection.id;
       const art = vscode.workspace
         .getConfiguration("vsclide")
@@ -185,6 +188,7 @@ export class ReplView implements vscode.WebviewViewProvider {
       );
       const id = await connection.createRepl();
       this.adopt(connection, id);
+      if (chosen) this.ide.setActive(chosen.id);
     } catch (error) {
       this.log(`vsclide: could not start a REPL: ${(error as Error).message}`);
       this.post(

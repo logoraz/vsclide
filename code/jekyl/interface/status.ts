@@ -59,6 +59,11 @@ export class Status implements vscode.Disposable {
       "vsclide.lispRunning",
       info !== undefined,
     );
+    void vscode.commands.executeCommand(
+      "setContext",
+      "vsclide.severalConnections",
+      others > 0,
+    );
     if (active && info && this.inDebugger) {
       this.item.text = "$(debug) Lisp: debugging";
       this.item.command = "vsclide.showDebugger";
