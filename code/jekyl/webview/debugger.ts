@@ -346,17 +346,30 @@ function renderInspector(state: PanelState): void {
 /// Connections
 
 /**
- * Draw the grouped list: a heading for each connection, and under it its
- * debugger and inspector. Hidden while there is one connection, when the
- * tabs say enough.
+ * Draw the connection switcher: a button naming the connection on view,
+ * with a badge counting the debuggers waiting on the others, and the
+ * pop-out list of every connection with its debugger and inspector.
+ * Hidden while there is one connection, when the tabs say enough.
  */
-function renderSidebar(state: PanelState): void {
-  const sidebar = element("sidebar");
-  sidebar.textContent = "";
-  sidebar.classList.toggle("shown", state.connections.length > 1);
+function renderSwitcher(state: PanelState): void {
+  const many = state.connections.length > 1;
+  element("switcher").classList.toggle("shown", many);
+  if (!many) {
+    closeMenu();
+    return;
+  }
+  const viewing = state.connections.find((c) => c.id === state.viewing);
+  element("switch-name").textContent = viewing?.name ?? "Connections";
+  const waiting = state.connections
+    .filter((c) => c.id !== state.viewing)
+    .reduce((total, c) => total + c.levels, 0);
+  const badge = element("badge");
+  badge.textContent = String(waiting);
+  badge.style.display = waiting > 0 ? "inline-block" : "none";
+  const menu = element("menu");
+  menu.textContent = "";
   for (const connection of state.connections) {
-    const group = make("div");
-    group.appendChild(make("div", "group-name", connection.name));
+    menu.appendChild(make("div", "group-name", connection.name));
     const entries: [PanelState["tab"], string][] = [
       [
         "debugger",
@@ -369,13 +382,18 @@ function renderSidebar(state: PanelState): void {
     for (const [tab, label] of entries) {
       const on = connection.id === state.viewing && tab === state.tab;
       const entry = make("div", on ? "entry active" : "entry", label);
-      entry.addEventListener("click", () =>
-        vscode.postMessage({ type: "view", connectionId: connection.id, tab }),
-      );
-      group.appendChild(entry);
+      entry.addEventListener("click", () => {
+        closeMenu();
+        vscode.postMessage({ type: "view", connectionId: connection.id, tab });
+      });
+      menu.appendChild(entry);
     }
-    sidebar.appendChild(group);
   }
+}
+
+/** Hide the pop-out list of connections. */
+function closeMenu(): void {
+  element("menu").classList.remove("open");
 }
 
 
@@ -391,7 +409,7 @@ function render(state: PanelState): void {
   }
   const notice = element("notice");
   notice.textContent = state.notice ?? "";
-  renderSidebar(state);
+  renderSwitcher(state);
   renderDebugger(state);
   renderInspector(state);
   if (lastTab !== state.tab) {
@@ -408,6 +426,17 @@ for (const tab of ["debugger", "inspector"] as const) {
     vscode.postMessage({ type: "tab", tab }),
   );
 }
+
+element("switch").addEventListener("click", () =>
+  element("menu").classList.toggle("open"),
+);
+/** A click outside the switcher, or Escape, closes its list. */
+document.addEventListener("click", (event) => {
+  if (!element("switcher").contains(event.target as Node)) closeMenu();
+});
+document.addEventListener("keydown", (event) => {
+  if (event.key === "Escape") closeMenu();
+});
 
 element("more-frames").addEventListener("click", () =>
   vscode.postMessage({ type: "moreFrames" }),

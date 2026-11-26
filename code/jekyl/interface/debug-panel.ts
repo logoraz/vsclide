@@ -573,12 +573,16 @@ ${STYLE}
 </style>
 </head>
 <body>
-<div id="sidebar"></div>
 <div id="main">
 <div id="tabs">
   <button id="tab-debugger" class="tab">Debugger</button>
   <button id="tab-inspector" class="tab">Inspector</button>
   <span id="notice"></span>
+  <span id="switcher">
+    <button id="switch" class="switch"><span id="switch-name"></span>
+      <span id="badge"></span><span class="caret">\u22ef</span></button>
+    <div id="menu"></div>
+  </span>
 </div>
 
 <div id="debugger" class="page">
@@ -668,12 +672,28 @@ const STYLE = `
          color: var(--vscode-editor-foreground); }
   #main { flex: 1; display: flex; flex-direction: column; min-width: 0;
           min-height: 0; }
-  #sidebar { display: none; width: 180px; flex-direction: column;
-             overflow-y: auto; border-right: 1px solid
-             var(--vscode-panel-border);
-             font-family: var(--vscode-font-family);
-             font-size: var(--vscode-font-size); }
-  #sidebar.shown { display: flex; }
+  #switcher { display: none; position: relative; margin-left: auto; }
+  #switcher.shown { display: block; }
+  button.switch { display: flex; align-items: center; gap: 6px;
+                  color: var(--vscode-foreground);
+                  background: transparent;
+                  font-family: var(--vscode-font-family);
+                  font-size: var(--vscode-font-size); }
+  button.switch:hover { background:
+    var(--vscode-toolbar-hoverBackground); }
+  #badge { display: none; min-width: 16px; padding: 0 4px;
+           border-radius: 8px; text-align: center; font-size: 11px;
+           color: var(--vscode-badge-foreground);
+           background: var(--vscode-badge-background); }
+  #menu { display: none; position: absolute; z-index: 10; right: 0;
+          top: 100%; min-width: 200px; padding: 2px 0;
+          background: var(--vscode-menu-background,
+                          var(--vscode-editor-background));
+          border: 1px solid var(--vscode-panel-border);
+          box-shadow: 0 2px 8px var(--vscode-widget-shadow);
+          font-family: var(--vscode-font-family);
+          font-size: var(--vscode-font-size); }
+  #menu.open { display: block; }
   .group-name { padding: 4px 8px 2px; font-weight: bold;
                 color: var(--vscode-descriptionForeground);
                 white-space: nowrap; overflow: hidden;
